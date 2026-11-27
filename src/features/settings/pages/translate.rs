@@ -1,13 +1,14 @@
 //! Translate (`settings-window.js` "TRANSLATE"): the engine, the source and
 //! target languages, (Live translate on in Labs) the live refresh, the
-//! offline models' update (while one still has the older v1 decoder) and
-//! the OptimaMT credit.
-use crate::shared::app_language::{S, fmt};
-use crate::shared::kit::icon::Icon;
+//! offline models list (one row per installed pair: status, Update, progress,
+//! Cancel, Add a language pair, OptimaMT link), and the Game glossaries row
+//! with its one-line note.
+use crate::shared::app_language::{S, fmt, language_name};
+use crate::shared::kit::icon::{Icon, glyph};
 use crate::t;
 use iced::widget::tooltip::Position;
 use iced::widget::{Space, column, container};
-use iced::{Element, Fill};
+use iced::{Center, Element, Fill};
 
 use super::super::state::{Message, Named, SOURCES, State, TARGETS, issue};
 
@@ -16,14 +17,16 @@ use crate::features::text_reading::screens::model_download::mb;
 use crate::features::translate::mt;
 use crate::shared::config::Engine;
 use crate::shared::kit::button::{Kind, button, label, regular};
+use crate::shared::kit::card::{icon_tile, quiet_note};
+use crate::shared::kit::chip::{Tone, status};
 use crate::shared::kit::choice_card::{Choice as Card, Mark, choice_cards};
 use crate::shared::kit::dropdown::dropdown;
 use crate::shared::kit::field::input;
 use crate::shared::kit::progress;
 use crate::shared::kit::section::section;
 use crate::shared::kit::setting_row::{self, title};
-use crate::shared::kit::text::{error, paragraph, sub};
-use crate::shared::kit::tokens::{Role, space};
+use crate::shared::kit::text::{accent, error, paragraph, sub, text};
+use crate::shared::kit::tokens::{Role, radius, settings, size, space};
 use crate::shared::kit::tooltip::tip;
 
 /// The OptimaMT models (the lighter decoders) on Hugging Face.
@@ -31,7 +34,39 @@ pub const OPTIMA_MT: &str = "https://huggingface.co/OptimaMT";
 /// Labs Live's "Live refresh" row (hidden: see where it is drawn).
 const LIVE_REFRESH_ROW: bool = false;
 
-/// The model row's state: the installed pairs and how many still have the
+/// One installed language pair shown in the Offline models list.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PairRow {
+    pub name: String,
+    pub meta: String,
+    pub outdated: bool,
+    pub update_bytes: u64,
+}
+
+impl PairRow {
+    pub fn from_codes(
+        source: &str,
+        target: &str,
+        total_bytes: u64,
+        outdated: bool,
+        update_bytes: u64,
+    ) -> Self {
+        let name = format!(
+            "{} \u{2192} {}",
+            language_name(source),
+            language_name(target)
+        );
+        let meta = fmt(S::tr_pair_meta, &[&source, &target, &mb(total_bytes)]);
+        Self {
+            name,
+            meta,
+            outdated,
+            update_bytes,
+        }
+    }
+}
+
+/// The model section's state: the installed pairs and how many still have the
 /// v1 decoder (with the bytes their update fetches), and the update.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Models {
@@ -39,7 +74,8 @@ pub struct Models {
     pub(crate) all: usize,
     pub(crate) bytes: u64,
     pub(crate) now: Now,
-    /// The row's description and button, made from the above.
+    pub(crate) pairs: Vec<PairRow>,
+    /// The header's description and button, made from the above.
     desc: String,
     button: String,
 }
@@ -56,14 +92,32 @@ pub enum Now {
 impl Models {
     /// Counted from the disk (sizes only).
     pub fn count() -> Models {
-        // (a pair whose v2 file is already here only waits for its swap)
-        let (old, all) = mt::installed();
-        let bytes: Vec<u64> = old
+        let installed = mt::installed_pairs();
+        let pairs: Vec<PairRow> = installed
             .iter()
-            .map(|p| p.update_bytes())
-            .filter(|&b| b > 0)
+            .map(|p| {
+                PairRow::from_codes(
+                    p.pair.source,
+                    p.pair.target,
+                    p.total_bytes,
+                    p.outdated,
+                    p.update_bytes,
+                )
+            })
             .collect();
-        Models::of(bytes.len(), all, bytes.iter().sum(), Now::Idle)
+        let update_bytes: Vec<u64> = installed
+            .iter()
+            .filter(|p| p.outdated && p.update_bytes > 0)
+            .map(|p| p.update_bytes)
+            .collect();
+        let mut m = Models::of(
+            update_bytes.len(),
+            installed.len(),
+            update_bytes.iter().sum(),
+            Now::Idle,
+        );
+        m.pairs = pairs;
+        m
     }
 
     pub(crate) fn of(old: usize, all: usize, bytes: u64, now: Now) -> Models {
@@ -72,6 +126,7 @@ impl Models {
             all,
             bytes,
             now,
+            pairs: Vec::new(),
             desc: String::new(),
             button: String::new(),
         };
@@ -137,49 +192,141 @@ impl Models {
     }
 }
 
-/// The model row, while an installed pair still has the v1 decoder: how
-/// many, and Update now (its progress and Cancel; Try again after a stop).
-fn models_row(m: &Models) -> Option<Element<'_, Message>> {
-    if m.current() || (m.bytes == 0 && m.now == Now::Idle) {
-        return None;
+/// Top header of the Offline models section (`.mhead`): title + OptimaMT description, and the
+/// 300 px "Update now (about N MB)" action when any installed pair is still on v1.
+fn models_header(m: &Models) -> Element<'_, Message> {
+    let mut left = column![
+        title(t!(tr_models)),
+        paragraph(sub(Role::ROW_DESC, t!(tr_optima)))
+    ]
+    .spacing(space::TRACK_GAP)
+    .width(Fill)
+    .align_x(crate::shared::kit::dir::start());
+    if m.current() {
+        left = left.push(paragraph(sub(Role::ROW_DESC, t!(tr_models_current))));
+    } else if m.bytes > 0 && m.pairs.is_empty() {
+        left = left.push(paragraph(sub(Role::ROW_DESC, &m.desc)));
     }
-    let control: Element<'_, Message> = match m.now {
-        Now::Idle => setting_row::action(&m.button, Kind::Elevated, Some(Message::UpdateModels)),
-        Now::Updating(share) => column![
-            progress::bar(share),
-            crate::dir_row![
-                Space::new().width(Fill),
-                regular(t!(c_cancel), false, Some(Message::StopModels))
-            ],
-        ]
-        .spacing(space::GAP)
-        .into(),
-        Now::Failed(_) => setting_row::action(
-            t!(md_try_again),
-            Kind::Elevated,
-            Some(Message::UpdateModels),
-        ),
+    let right: Option<Element<'_, Message>> = if m.current() || (m.bytes == 0 && m.now == Now::Idle)
+    {
+        None
+    } else {
+        let ctl: Element<'_, Message> = match &m.now {
+            Now::Idle => {
+                setting_row::action(&m.button, Kind::Elevated, Some(Message::UpdateModels))
+            }
+            Now::Updating(share) => crate::dir_row![
+                container(progress::bar(*share)).width(Fill),
+                regular(t!(c_cancel), false, Some(Message::StopModels)),
+            ]
+            .spacing(space::GAP)
+            .align_y(Center)
+            .into(),
+            Now::Failed(_) => setting_row::action(
+                t!(md_try_again),
+                Kind::Elevated,
+                Some(Message::UpdateModels),
+            ),
+        };
+        Some(container(ctl).width(size::CONTROL_COLUMN).into())
     };
-    Some(setting_row::row(title(t!(tr_models)), &m.desc, control))
+    let mut row = crate::dir_row![left]
+        .spacing(settings::CARD_GAP)
+        .align_y(Center);
+    if let Some(r) = right {
+        row = row.push(r);
+    }
+    container(row)
+        .width(Fill)
+        .padding([settings::ROW_PAD_Y, 0.0])
+        .into()
 }
 
-/// Under the rows: offline translation runs on OptimaMT models (and, when
-/// every installed one has the lighter decoder, that they are up to date),
-/// with the link.
-fn optima(m: &Models) -> Element<'_, Message> {
-    let mut note = column![paragraph(sub(Role::ROW_DESC, t!(tr_optima)))];
-    if m.current() {
-        note = note.push(paragraph(sub(Role::ROW_DESC, t!(tr_models_current))));
-    }
+/// One installed language pair row (`.mrow2`): translate icon tile, pair name + code/size,
+/// and status chip / Update / progress + Cancel.
+fn pair_row<'a>(pair: &'a PairRow, now: &'a Now, desc: &'a str) -> Element<'a, Message> {
+    let tile = icon_tile(
+        Icon::Translate.glyph(),
+        size::ICON_SMALL,
+        settings::MODEL_TILE,
+        radius::CONTROL,
+    );
+    let info = column![
+        text(Role::ROW_TITLE, &pair.name),
+        sub(Role::ROW_DESC, &pair.meta),
+    ]
+    .spacing(space::TRACK_GAP)
+    .width(Fill)
+    .align_x(crate::shared::kit::dir::start());
+    let right: Element<'a, Message> = match (pair.outdated, now) {
+        (true, Now::Updating(share)) => crate::dir_row![
+            container(progress::bar(*share)).width(settings::MODEL_BAR_W),
+            sub(Role::ROW_DESC, desc),
+            button(label(t!(c_cancel)), Kind::Quiet, Some(Message::StopModels)),
+        ]
+        .spacing(space::ROW_Y)
+        .align_y(Center)
+        .into(),
+        (true, Now::Failed(_)) => crate::dir_row![
+            status(t!(tr_m_stopped), Tone::Error),
+            button(
+                label(t!(md_try_again)),
+                Kind::Elevated,
+                Some(Message::UpdateModels)
+            ),
+        ]
+        .spacing(space::ROW_Y)
+        .align_y(Center)
+        .into(),
+        (true, Now::Idle) => crate::dir_row![
+            status(t!(tr_m_old), Tone::Warn),
+            button(
+                label(t!(tr_m_update)),
+                Kind::Elevated,
+                Some(Message::UpdateModels)
+            ),
+        ]
+        .spacing(space::ROW_Y)
+        .align_y(Center)
+        .into(),
+        (false, _) => status(t!(tr_m_ok), Tone::Ok),
+    };
+    container(
+        crate::dir_row![tile, info, right]
+            .spacing(settings::CARD_GAP)
+            .align_y(Center),
+    )
+    .width(Fill)
+    .padding([space::ROW_Y, 0.0])
+    .into()
+}
+
+/// Footer of the Offline models section (`.full.add`): "+ Add a language pair" on the start side,
+/// "OptimaMT on Hugging Face" external link on the end side.
+fn models_footer<'a>() -> Element<'a, Message> {
+    let add = tip(
+        button(
+            label(format!("+ {}", t!(tr_m_add))),
+            Kind::Quiet,
+            Some(Message::Section(super::super::state::Section::Translate)),
+        ),
+        t!(tr_m_add_hint),
+        Position::Top,
+    );
     let link = button(
-        label(t!(tr_optima_link)),
+        crate::dir_row![
+            accent(Role::CONTROL, t!(tr_optima_link)),
+            glyph(Icon::External.glyph(), size::ICON_SMALL),
+        ]
+        .spacing(space::GAP)
+        .align_y(Center),
         Kind::Quiet,
         Some(Message::OpenLink(OPTIMA_MT.into())),
     );
     container(
-        note.push(link)
+        crate::dir_row![add, Space::new().width(Fill), link]
             .spacing(space::GAP)
-            .align_x(crate::shared::kit::dir::start()),
+            .align_y(Center),
     )
     .width(Fill)
     .padding([space::ROW_Y, 0.0])
@@ -191,20 +338,33 @@ pub fn view(state: &State) -> Element<'_, Message> {
     if state.glossaries.is_editing() {
         return super::glossaries::editor(state);
     }
-    let mut page = column![section(Some(t!(sec_languages)), None, || {
-        language_rows(state)
-    })];
-    let models = models_row(&state.models);
-    page = page.push(section(Some(t!(sec_models)), None, || {
-        let mut rows: Vec<Element<'_, Message>> = models.into_iter().collect();
-        rows.push(optima(&state.models));
-        rows
-    }));
-    page.push(section(Some(t!(sec_games)), None, || {
-        vec![super::glossaries::row(state)]
-    }))
-    .spacing(crate::shared::kit::tokens::settings::SECTION_GAP)
-    .into()
+    let page = column![
+        section(Some(t!(sec_languages)), None, || language_rows(state)),
+        section(Some(t!(sec_models)), None, || {
+            let mut rows: Vec<Element<'_, Message>> = vec![models_header(&state.models)];
+            if state.models.pairs.is_empty() && state.models.all == 0 {
+                rows.push(
+                    container(sub(Role::ROW_DESC, t!(tr_m_none)))
+                        .padding([space::ROW_Y, 0.0])
+                        .into(),
+                );
+            } else {
+                for p in &state.models.pairs {
+                    rows.push(pair_row(p, &state.models.now, &state.models.desc));
+                }
+            }
+            rows.push(models_footer());
+            rows
+        }),
+        section(Some(t!(sec_games)), None, || {
+            vec![
+                super::glossaries::row(state),
+                quiet_note(Icon::Glossary.glyph(), t!(gl_note)),
+            ]
+        }),
+    ]
+    .spacing(settings::SECTION_GAP);
+    page.into()
 }
 
 /// Engine (three cards, the design's order), source and target language, the Live refresh row.

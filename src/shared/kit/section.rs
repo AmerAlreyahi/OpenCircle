@@ -6,11 +6,7 @@ use iced::{Border, Element, Fill};
 use super::divider::divider;
 use super::text::muted;
 use super::themes::c;
-use super::tokens::{Role, radius};
-
-/// The section's padding `[top and bottom, sides]`, and the label's gap under it.
-const PAD: [f32; 2] = [16.0, 20.0];
-const LABEL_GAP: f32 = 6.0;
+use super::tokens::{Role, settings};
 
 /// `rows` (built by the closure: its `setting_row`s draw no rule of their own) under `label` (`None`: no label); `after` sits at the label's end ("See how it works").
 pub fn section<'a, Message: 'a>(
@@ -21,13 +17,20 @@ pub fn section<'a, Message: 'a>(
     let rows = super::setting_row::ruled_by_section(rows);
     let mut list = column![];
     if label.is_some() || after.is_some() {
-        let head = super::dir::row([
-            muted(Role::SECTION, label.unwrap_or("")).into(),
-            Space::new().width(Fill).into(),
-        ])
-        .push(after)
-        .align_y(iced::Center);
-        list = list.push(head).push(Space::new().height(LABEL_GAP));
+        let head = container(
+            super::dir::row([
+                muted(Role::SECTION, label.unwrap_or("")).into(),
+                Space::new().width(Fill).into(),
+            ])
+            .push(after)
+            .align_y(iced::Center),
+        )
+        .padding(
+            iced::Padding::ZERO
+                .top(settings::SECTION_HEAD_TOP)
+                .bottom(settings::SECTION_HEAD_BOTTOM),
+        );
+        list = list.push(head);
     }
     for (i, row) in rows.into_iter().enumerate() {
         if i > 0 {
@@ -36,11 +39,11 @@ pub fn section<'a, Message: 'a>(
         list = list.push(row);
     }
     container(list)
-        .padding(PAD)
+        .padding(settings::SECTION_PAD)
         .width(Fill)
         .style(|_| container::Style {
             border: Border::default()
-                .rounded(radius::CARD)
+                .rounded(settings::SECTION_RADIUS)
                 .width(1)
                 .color(c().divider),
             ..container::Style::default()

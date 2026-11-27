@@ -20,6 +20,33 @@ use crate::shared::kit::text::sub;
 use crate::shared::kit::tokens::{Role, space};
 
 pub fn view(state: &State) -> Element<'_, Message> {
+    section_for(state, true)
+}
+
+/// The Text reading section on Circle to Search: engine chooser on Windows only (`windows`),
+/// plus the Reading language row (bound to `translate.source`, which OCR uses on both platforms).
+pub fn section_for(state: &State, windows: bool) -> Element<'_, Message> {
+    let source = super::super::state::SOURCES
+        .iter()
+        .find(|l| l.0.code == state.draft.translate.source)
+        .copied();
+    let reading_lang = setting_row::row(
+        title(t!(t_read_lang)),
+        t!(t_read_lang_d),
+        crate::shared::kit::dropdown::dropdown(
+            &super::super::state::SOURCES,
+            source,
+            &state.draft.translate.source,
+            |l: super::super::state::Named| Message::Source(l.0),
+        ),
+    );
+    if !windows {
+        return section(
+            Some(crate::shared::app_language::tr(S::nav_text)),
+            None,
+            || vec![reading_lang],
+        );
+    }
     let reader = state.draft.selection.text_reader;
     let engines = [
         (
@@ -61,7 +88,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     section(
         Some(crate::shared::app_language::tr(S::nav_text)),
         None,
-        || vec![engine],
+        || vec![engine, reading_lang],
     )
 }
 

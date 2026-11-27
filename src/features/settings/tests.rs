@@ -1397,7 +1397,10 @@ fn the_model_row_says_what_is_left_and_updates_it() {
     let optima =
         "Local translation runs on OptimaMT models stored on this PC. Credits are in About.";
     let t = texts(&s);
-    assert!(!t.iter().any(|t| t == row), "nothing installed: {t:?}");
+    assert!(
+        !t.iter().any(|t| t.starts_with("Update now")),
+        "nothing installed: {t:?}"
+    );
     assert!(t.iter().any(|t| t == optima) && t.iter().any(|t| t == "OptimaMT on Hugging Face"));
     s.models = Models::of(3, 15, 177_233_364, Now::Idle);
     let t = texts(&s);
@@ -1443,7 +1446,7 @@ fn the_model_row_says_what_is_left_and_updates_it() {
     // all current: no row, the calm line
     s.models = Models::of(0, 15, 0, Now::Idle);
     let t = texts(&s);
-    assert!(!t.iter().any(|t| t == row), "{t:?}");
+    assert!(!t.iter().any(|t| t.starts_with("Update now")), "{t:?}");
     assert!(
         t.iter()
             .any(|t| t == "Your translation models are up to date."),
@@ -2572,8 +2575,8 @@ fn a_preview_without_a_clip_shows_only_its_heading() {
     moving_update(&mut s, Message::Preview("song", true));
     with_clip(&mut s);
     let texts = shot::texts(view(&s));
-    assert!(texts.iter().any(|t| t == "Hide preview"), "{texts:?}");
-    assert!(texts.iter().any(|t| t == "Preview"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Hide the demo"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "HOW IT WORKS"), "{texts:?}");
     // a page without a preview starts no clock
     moving_update(&mut s, Message::Section(Section::Privacy));
     s.moved = None;
@@ -2615,12 +2618,9 @@ fn play_preview_downloads_only_on_the_click() {
     // a player with its still; the clips aren't here (empty data folder)
     assert!(s.players.iter().all(|(_, p)| !p.on_disk()));
     let texts = shot::texts(view(&s));
-    assert!(texts.iter().any(|t| t == "See how it works"), "{texts:?}");
-    assert!(
-        !texts.iter().any(|t| t == "Preview"),
-        "folded: no stage: {texts:?}"
-    );
-    let out = update(&mut s, Message::Preview("ai", true));
+    assert!(texts.iter().any(|t| t == "Hide the demo"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Play preview"), "{texts:?}");
+    let out = update(&mut s, Message::Fetch("ai"));
     assert_eq!(out, Outcome::Fetch("ai", vec!["ai-browser"]));
     assert!(shot::texts(view(&s)).iter().any(|t| t == "Downloading…"));
     assert_eq!(update(&mut s, Message::Fetch("ai")), Outcome::None, "once");
@@ -2656,19 +2656,20 @@ fn c7_switches_and_one_play_preview_row() {
     assert!(!texts.iter().any(|t| t == "Off" || t == "On"), "{texts:?}");
     update(&mut s, Message::Section(Section::Ai));
     let texts = shot::texts(view(&s));
-    assert!(texts.iter().any(|t| t == "See how it works"), "{texts:?}");
-    for gone in ["Preview", "Hide preview", "Show preview"] {
-        assert!(!texts.iter().any(|t| t == gone), "{gone}: {texts:?}");
-    }
-    // clips on this PC do not unfold it: only the click does (session-only, never saved)
+    assert!(texts.iter().any(|t| t == "Hide the demo"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Play preview"), "{texts:?}");
+    // folding hides the demo block and turns the header link into "See how it works"
     with_clip(&mut s);
     s.opened.clear();
     let texts = shot::texts(view(&s));
     assert!(texts.iter().any(|t| t == "See how it works"), "{texts:?}");
-    assert!(!texts.iter().any(|t| t == "Preview"), "no stage: {texts:?}");
-    s.opened.push("ai"); // (the click; its clips are here)
+    assert!(
+        !texts.iter().any(|t| t == "HOW IT WORKS"),
+        "folded: {texts:?}"
+    );
+    s.opened.push("ai");
     let texts = shot::texts(view(&s));
-    assert!(texts.iter().any(|t| t == "Hide preview"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Hide the demo"), "{texts:?}");
 }
 
 /// The stage is as wide as the page and 16:9; its width in px (times the
@@ -2732,7 +2733,7 @@ fn hiding_a_preview_is_session_only_and_folds_it_into_the_play_row() {
     let (mut s, _) = state(Some(path.clone()));
     update(&mut s, Message::Section(Section::Ai));
     with_clip(&mut s);
-    assert!(shot::texts(view(&s)).iter().any(|t| t == "Hide preview"));
+    assert!(shot::texts(view(&s)).iter().any(|t| t == "Hide the demo"));
     moving_update(&mut s, Message::Preview("ai", false));
     assert!(!s.animating(), "hidden: no clock");
     update(&mut s, Message::Save);
@@ -2740,11 +2741,15 @@ fn hiding_a_preview_is_session_only_and_folds_it_into_the_play_row() {
     assert!(saved.is_empty(), "nothing written: {saved:?}");
     let texts = shot::texts(view(&s));
     assert!(texts.iter().any(|t| t == "See how it works"), "{texts:?}");
-    assert!(!texts.iter().any(|t| t == "Preview" || t == "Hide preview"));
+    assert!(
+        !texts
+            .iter()
+            .any(|t| t == "HOW IT WORKS" || t == "Hide the demo")
+    );
     moving_update(&mut s, Message::Preview("ai", true));
-    s.fetching.clear(); // (its clips were not on this PC: the click started a download)
+    s.fetching.clear();
     with_clip(&mut s);
-    assert!(shot::texts(view(&s)).iter().any(|t| t == "Hide preview"));
+    assert!(shot::texts(view(&s)).iter().any(|t| t == "Hide the demo"));
     update(&mut s, Message::Save);
     assert!(
         Config::load_from(&path)
@@ -5498,4 +5503,120 @@ fn a_flush_that_runs_first_never_lets_the_older_write_land_last() {
     flush.run();
     late.join().unwrap();
     assert_eq!(Config::load_from(&path).0.studio.file_name, "abc");
+}
+
+// ---- F-01: Settings fidelity pass tests ----
+
+#[test]
+fn appearance_uses_mini_theme_cards_and_design_tokens() {
+    use crate::shared::kit::tokens::settings as tok;
+    assert_eq!(tok::MINI_MODE_H, 140.0);
+    assert_eq!(tok::MINI_THEME_H, 82.0);
+    assert_eq!(tok::CARD_GAP, 12.0);
+    assert_eq!(tok::SECTION_RADIUS, 14.0);
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Appearance));
+    let texts = shot::texts(view(&s));
+    for want in [
+        "Mode", "Light", "Dark", "System", "3 themes", "9 themes", "Daylight", "Sapphire",
+    ] {
+        assert!(
+            texts.iter().any(|t| t == want),
+            "missing {want} in {texts:?}"
+        );
+    }
+}
+
+#[test]
+fn appearance_shows_look_cards_in_preview_grid() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Appearance));
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Sapphire Glow"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Custom"), "{texts:?}");
+    // Old colour-bar list badges ("Default" / "Popular" / "Your own") are replaced by clean mini-preview cards.
+    assert!(!texts.iter().any(|t| t == "Popular"), "{texts:?}");
+}
+
+#[test]
+fn translate_shows_offline_model_list_rows_and_glossary_note() {
+    use super::pages::translate::{Models, Now, PairRow};
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Translate));
+    let mut m = Models::of(1, 2, 35 * 1024 * 1024, Now::Idle);
+    m.pairs = vec![
+        PairRow::from_codes("en", "ar", 74_000_000, false, 0),
+        PairRow::from_codes("fr", "en", 68_000_000, true, 35 * 1024 * 1024),
+    ];
+    s.models = m;
+    let texts = shot::texts(view(&s));
+    for want in [
+        "English → Arabic",
+        "en → ar · 74 MB",
+        "Up to date",
+        "French → English",
+        "fr → en · 68 MB",
+        "Older version",
+        "Update",
+        "+ Add a language pair",
+        "OptimaMT on Hugging Face",
+        "Edit",
+    ] {
+        assert!(
+            texts.iter().any(|t| t == want),
+            "missing {want} in {texts:?}"
+        );
+    }
+    assert!(
+        texts
+            .iter()
+            .any(|t| t.contains("Glossaries show up only on a game screen")),
+        "missing glossary note in {texts:?}"
+    );
+    // Updating state shows Cancel; Failed state shows Stopped
+    s.models.now = Now::Updating(0.5);
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Cancel"), "{texts:?}");
+    s.models.now = Now::Failed("offline".into());
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Stopped"), "{texts:?}");
+}
+
+#[test]
+fn circle_to_search_shows_reading_language_row_bound_to_source() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Look));
+    for windows in [true, false] {
+        let texts = shot::texts(pages::look::page_for(&s, windows));
+        assert!(
+            texts.iter().any(|t| t == "Reading language"),
+            "windows={windows}: {texts:?}"
+        );
+    }
+    let fr = crate::features::translate::lang::find("fr").unwrap();
+    update(&mut s, Message::Source(*fr));
+    assert_eq!(s.draft.translate.source, "fr");
+    let texts = shot::texts(pages::look::page_for(&s, true));
+    assert!(texts.iter().any(|t| t.contains("French")), "{texts:?}");
+}
+
+#[test]
+fn previews_are_open_by_default_without_downloading() {
+    let (mut s, _) = state(None);
+    let out = update(&mut s, Message::Section(Section::Look));
+    assert!(
+        !matches!(out, Outcome::Fetch(..)),
+        "opening a page must never download a preview clip"
+    );
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Hide the demo"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "HOW IT WORKS"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Play preview"), "{texts:?}");
+    with_clip(&mut s);
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Replay"), "{texts:?}");
+    // Clicking Hide the demo folds it back to "See how it works"
+    update(&mut s, Message::Preview("look", false));
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "See how it works"), "{texts:?}");
 }

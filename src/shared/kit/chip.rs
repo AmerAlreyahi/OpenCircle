@@ -114,6 +114,8 @@ pub enum Tone {
     Ok,
     /// On its way (`accent`).
     Busy,
+    /// Needs attention (`WARN`).
+    Warn,
     /// Failed, or held back (`DANGER`).
     Error,
 }
@@ -124,6 +126,7 @@ pub fn status<'a, Message: 'a>(label: impl Into<String>, tone: Tone) -> Element<
     let dot: Color = match tone {
         Tone::Ok => fixed::SUCCESS,
         Tone::Busy => c().accent,
+        Tone::Warn => fixed::WARN,
         Tone::Error => fixed::DANGER,
     };
     marked(self::dot(dot), label)

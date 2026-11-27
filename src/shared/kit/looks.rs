@@ -25,7 +25,9 @@ pub const GLOW_ONLY: bool = true;
 pub struct Look {
     pub id: &'static str,
     pub name: &'static str,
+    #[allow(dead_code)]
     pub desc: &'static str,
+    #[allow(dead_code)]
     pub badge: &'static str,
     pub kind: Kind,
     /// `c1`, `c2`: the edge glow near the edge and further in, alpha included.

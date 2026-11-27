@@ -9,7 +9,7 @@ use iced::{Border, Element, Fill};
 use super::icon::glyph as icon_glyph;
 use super::text::{sub, text};
 use super::themes::{c, on};
-use super::tokens::{Role, radius, space};
+use super::tokens::{Role, radius, settings};
 
 /// What marks a card: a lucide glyph, or the OpenCircle logo (the one AI marker).
 #[derive(Debug, Clone, Copy)]
@@ -26,12 +26,7 @@ pub struct Choice<'a> {
     pub desc: &'a str,
 }
 
-const TILE: f32 = 32.0;
 const RING: f32 = 20.0;
-const PAD: f32 = 14.0;
-/// Least heights: side by side, standing.
-const WIDE_H: f32 = 78.0;
-const TALL_H: f32 = 132.0;
 
 fn tile<'a, Message: 'a>(mark: Mark, chosen: bool) -> Element<'a, Message> {
     let tint = match chosen {
@@ -39,14 +34,14 @@ fn tile<'a, Message: 'a>(mark: Mark, chosen: bool) -> Element<'a, Message> {
         false => c().text,
     };
     let inner: Element<'a, Message> = match mark {
-        Mark::Glyph(g) => icon_glyph(g, 16.0).color(tint).into(),
-        Mark::Logo => iced::widget::image(super::logo::logo(16))
-            .width(16)
-            .height(16)
+        Mark::Glyph(g) => icon_glyph(g, settings::CHOICE_ICON).color(tint).into(),
+        Mark::Logo => iced::widget::image(super::logo::logo(18))
+            .width(18)
+            .height(18)
             .into(),
     };
     container(inner)
-        .center(TILE)
+        .center(settings::CHOICE_TILE)
         .style(move |_| container::Style {
             background: Some(
                 match chosen {
@@ -56,7 +51,7 @@ fn tile<'a, Message: 'a>(mark: Mark, chosen: bool) -> Element<'a, Message> {
                 .into(),
             ),
             border: Border::default()
-                .rounded(radius::CONTROL)
+                .rounded(radius::TRACK)
                 .width(if chosen { 0 } else { 1 })
                 .color(c().divider),
             ..container::Style::default()
@@ -89,10 +84,10 @@ fn card<'a, Message: Clone + 'a>(
     on_press: Message,
 ) -> Element<'a, Message> {
     let words = column![
-        text(Role::CARD_HEADING, option.title).size(super::text::size(Role::ROW_TITLE) + 1.0),
-        sub(Role::ROW_DESC, option.desc)
+        text(Role::CHOICE_TITLE, option.title),
+        sub(Role::CHOICE_DESC, option.desc).line_height(1.5)
     ]
-    .spacing(2)
+    .spacing(if tall { 4 } else { 3 })
     .align_x(super::dir::start());
     let body: Element<'a, Message> = match tall {
         true => column![
@@ -101,7 +96,7 @@ fn card<'a, Message: Clone + 'a>(
                 Space::new().width(Fill).into(),
                 ring(chosen)
             ]),
-            Space::new().height(space::GAP + 2.0),
+            Space::new().height(settings::CARD_GAP),
             words
         ]
         .into(),
@@ -114,12 +109,16 @@ fn card<'a, Message: Clone + 'a>(
         .align_y(iced::Alignment::Start)
         .into(),
     };
-    let min = if tall { TALL_H } else { WIDE_H };
+    let min = if tall {
+        settings::CHOICE_TALL_H
+    } else {
+        settings::CHOICE_WIDE_H
+    };
     super::focus::press(
-        button(column![body, Space::new().height(Fill)].height(min - 2.0 * PAD))
+        button(column![body, Space::new().height(Fill)].height(min - 2.0 * settings::CHOICE_PAD))
             .width(Fill)
             .height(min)
-            .padding(PAD)
+            .padding(settings::CHOICE_PAD)
             .style(move |_, status| {
                 let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);
                 button::Style {
@@ -153,5 +152,5 @@ pub fn choice_cards<'a, Message: Clone + 'a>(
         .iter()
         .enumerate()
         .map(|(i, o)| card(*o, i == chosen, tall, pick(i)));
-    super::card::grid(options.len().clamp(1, 4), cards)
+    super::card::grid_spaced(options.len().clamp(1, 4), settings::CARD_GAP, cards)
 }

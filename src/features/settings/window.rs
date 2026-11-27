@@ -301,7 +301,8 @@ fn page(state: &State) -> Element<'_, Message> {
         .filter(|_| !wide)
         .map(|(key, open)| {
             let go = Some(Message::Preview(key, !open));
-            button(label(t!(c_see_how)), Kind::Quiet, go)
+            let text = if open { t!(c_hide_demo) } else { t!(c_see_how) };
+            button(label(text), Kind::Quiet, go)
         });
     let head = page_head(page.glyph, tr(page.title), tr(page.line), see);
     let editing =
@@ -324,7 +325,9 @@ fn page(state: &State) -> Element<'_, Message> {
         .spacing(settings::SECTION_GAP);
     // at most `CONTENT_MAX` wide, in the middle of the card
     let body = container(container(body).id(PAGE_ID).width(Fill))
-        .padding(Padding::from([CONTENT_PAD[0], CONTENT_PAD[1]]))
+        .padding(
+            Padding::from([CONTENT_PAD[0], CONTENT_PAD[1]]).bottom(settings::CONTENT_PAD_BOTTOM),
+        )
         .max_width(CONTENT_MAX)
         .width(Fill);
     let body = container(body).center_x(Fill).width(Fill);

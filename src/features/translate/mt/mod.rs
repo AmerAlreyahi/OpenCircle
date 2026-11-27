@@ -1040,18 +1040,47 @@ static STOP: AtomicBool = AtomicBool::new(false);
 
 /// The installed pairs whose decoder is still v1, and how many pairs are
 /// installed (a v1 or v2 decoder): Settings > Translate's row. Sizes only.
-pub fn installed() -> (Vec<&'static Pair>, usize) {
-    let mut all = 0;
-    let mut old = Vec::new();
+/// One installed offline translation pair on disk (Settings > Translate's model list).
+#[derive(Debug, Clone, Copy)]
+pub struct InstalledPair {
+    pub pair: &'static Pair,
+    pub outdated: bool,
+    pub update_bytes: u64,
+    pub total_bytes: u64,
+}
+
+/// Every installed offline translation pair on disk (v1 or v2 decoder). Sizes only.
+pub fn installed_pairs() -> Vec<InstalledPair> {
+    let mut out = Vec::new();
     for p in &PAIRS {
         let d = p.decoder();
         if d.outdated() {
-            old.push(p);
-            all += 1;
+            out.push(InstalledPair {
+                pair: p,
+                outdated: true,
+                update_bytes: d.to_fetch(),
+                total_bytes: p.full_size(),
+            });
         } else if has_size(&d.path, d.v2.size) {
-            all += 1;
+            out.push(InstalledPair {
+                pair: p,
+                outdated: false,
+                update_bytes: 0,
+                total_bytes: p.full_size(),
+            });
         }
     }
+    out
+}
+
+pub fn installed() -> (Vec<&'static Pair>, usize) {
+    let pairs = installed_pairs();
+    let all = pairs.len();
+    let old = pairs
+        .into_iter()
+        .filter(|p| p.outdated)
+        .map(|p| p.pair)
+        .collect();
     (old, all)
 }
 

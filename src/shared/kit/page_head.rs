@@ -26,7 +26,7 @@ pub fn page_head<'a, Message: 'a>(
             border: Border::default().rounded(radius::DRAWER - 6.0),
             ..container::Style::default()
         });
-    let mut second = super::dir::row([sub(Role::ROW_DESC, line).into()])
+    let mut second = super::dir::row([sub(Role::PAGE_SUB, line).into()])
         .spacing(10)
         .align_y(Center);
     if let Some(after) = after {

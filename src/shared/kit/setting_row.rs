@@ -118,11 +118,17 @@ fn ruled_with<'a, Message: 'a>(
     marked: bool,
     rule: bool,
 ) -> Element<'a, Message> {
-    let rule = rule && !SECTION_RULES.get();
-    let row = container(content).padding([space::ROW_Y, 0.0]);
+    let in_section = SECTION_RULES.get();
+    let rule = rule && !in_section;
+    let pad_y = if in_section {
+        super::tokens::settings::ROW_PAD_Y
+    } else {
+        space::ROW_Y
+    };
+    let row = container(content).padding([pad_y, 0.0]);
     let row = match marked {
         true => row
-            .padding([space::ROW_Y, space::GAP])
+            .padding([pad_y, space::GAP])
             .style(|_| iced::widget::container::Style {
                 background: Some(super::themes::c().accent_soft.into()),
                 border: iced::Border::default().rounded(super::tokens::radius::CONTROL),
@@ -247,9 +253,14 @@ pub fn block<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     let marked = note(desc);
+    let gap = if SECTION_RULES.get() {
+        super::tokens::settings::BLOCK_GAP
+    } else {
+        BLOCK_GAP
+    };
     ruled(
         column![text_block(title, desc), content.into()]
-            .spacing(BLOCK_GAP)
+            .spacing(gap)
             .align_x(super::dir::start()),
         marked,
     )

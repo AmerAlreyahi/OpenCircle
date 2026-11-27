@@ -4,10 +4,14 @@
 //! chosen `card_selected` with an `elevated_border` edge (light themes ring it
 //! in `card_ring`). States change colour only (no lift: the CPU renderer
 //! redraws the card alone). `grid` lays cards out in equal columns.
+#[cfg(test)]
 use iced::gradient::Linear;
 use iced::widget::{Space, button, column, container, row, stack};
-use iced::{Border, Center, Color, Element, Fill, Gradient, Radians};
+use iced::{Border, Center, Color, Element, Fill};
+#[cfg(test)]
+use iced::{Gradient, Radians};
 
+#[cfg(test)]
 use super::chip::badge;
 use super::text::{sub, text};
 use super::themes::{Theme, c};
@@ -18,6 +22,7 @@ const PAD: f32 = 16.0;
 const DOT: f32 = 10.0;
 const DOT_STEP: f32 = DOT - 4.0;
 /// A look card's colour strip (`h-2`).
+#[cfg(test)]
 const STRIP: f32 = 8.0;
 /// Between a theme card's lines (`gap-1`; a look card's are `GAP`).
 const LINE_GAP: f32 = 4.0;
@@ -129,6 +134,7 @@ pub fn theme_card<'a, Message: Clone + 'a>(
 /// `ActiveLookCard`: a strip of the look's colours (left to right), the name
 /// (`CARD_TITLE`) with its badge, the description (`CARD_DESC`, `text_sub`)
 /// under them. `on_press: None` = not offered (its name muted).
+#[cfg(test)]
 pub fn look_card<'a, Message: Clone + 'a>(
     name: &'a str,
     badge_label: &'a str,
@@ -170,14 +176,23 @@ pub fn grid<'a, Message: 'a>(
     columns: usize,
     cards: impl IntoIterator<Item = Element<'a, Message>>,
 ) -> Element<'a, Message> {
+    grid_spaced(columns, space::GAP, cards)
+}
+
+/// Like `grid`, with an explicit gap between rows and columns (`settings::CARD_GAP` in Settings).
+pub fn grid_spaced<'a, Message: 'a>(
+    columns: usize,
+    gap: f32,
+    cards: impl IntoIterator<Item = Element<'a, Message>>,
+) -> Element<'a, Message> {
     let mut cards = cards.into_iter().peekable();
-    let mut rows = column![].spacing(space::GAP);
+    let mut rows = column![].spacing(gap);
     while cards.peek().is_some() {
         let mut line: Vec<Element<'a, Message>> = cards.by_ref().take(columns).collect();
         while line.len() < columns {
             line.push(Space::new().width(Fill).into());
         }
-        rows = rows.push(super::dir::row(line).spacing(space::GAP));
+        rows = rows.push(super::dir::row(line).spacing(gap));
     }
     rows.into()
 }
@@ -278,4 +293,49 @@ pub fn chat<'a, Message: Clone + 'a>(chat: Chat<'a, Message>) -> Element<'a, Mes
     container(pick(content, chat.selected, Some(chat.open)))
         .width(chat.width)
         .into()
+}
+
+/// A small rounded icon tile on `hover` with a subtle `divider` rim (`extra.css` `.mic`, `.gic`).
+pub fn icon_tile<'a, Message: 'a>(
+    glyph: char,
+    icon_size: f32,
+    box_size: f32,
+    corner: f32,
+) -> Element<'a, Message> {
+    container(super::icon::glyph(glyph, icon_size).color(c().text_sub))
+        .center(box_size)
+        .style(move |_| container::Style {
+            background: Some(c().hover.into()),
+            border: Border::default()
+                .rounded(corner)
+                .width(1)
+                .color(c().divider),
+            ..container::Style::default()
+        })
+        .into()
+}
+
+/// A one-line quiet note row with a leading icon tile (`extra.css` `.gnote`).
+pub fn quiet_note<'a, Message: 'a>(glyph: char, line: &'a str) -> Element<'a, Message> {
+    let tile = icon_tile(
+        glyph,
+        super::tokens::size::ICON_SMALL,
+        super::tokens::settings::NOTE_TILE,
+        radius::MENU,
+    );
+    container(
+        super::dir::row([
+            tile,
+            super::text::paragraph(sub(Role::CHOICE_DESC, line)).into(),
+        ])
+        .spacing(super::tokens::settings::CARD_GAP)
+        .align_y(Center),
+    )
+    .width(Fill)
+    .padding(
+        iced::Padding::ZERO
+            .top(super::tokens::settings::ROW_PAD_Y)
+            .bottom(super::tokens::settings::CHOICE_PAD),
+    )
+    .into()
 }

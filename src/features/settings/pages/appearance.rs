@@ -3,7 +3,7 @@
 //! mode or logo colour rows; a config that never picked one follows the OS)
 //! and the active look cards (the design's 10, or the user's own: its rows
 //! under the cards). No Glass row until glass exists.
-use crate::shared::app_language::{S, tr};
+use crate::shared::app_language::{S, fmt, tr};
 use crate::t;
 use iced::Element;
 use iced::widget::column;
@@ -12,19 +12,19 @@ use super::super::state::{Message, State};
 use super::custom;
 use crate::shared::config::Theme;
 use crate::shared::config::{LookTheme, PRESETS};
-use crate::shared::kit::card::{grid, look_card, theme_card};
+use crate::shared::kit::card::{grid, grid_spaced, theme_card};
 use crate::shared::kit::chip::{Tone, status};
 use crate::shared::kit::looks::{LOOKS, Look};
 use crate::shared::kit::motion;
 use crate::shared::kit::section::section;
 use crate::shared::kit::setting_row::{self, title};
-use crate::shared::kit::theme_preview::{mode_card, theme_mini_card};
+use crate::shared::kit::theme_preview::{look_mini_card, mode_card, theme_mini_card};
 use crate::shared::kit::themes::THEMES;
 use crate::shared::theme;
 
 /// The theme cards' columns (`sm:grid-cols-3`), the look cards' (`grid-cols-2`).
 const COLUMNS: usize = 3;
-const LOOK_COLUMNS: usize = 2;
+const MINI_COLUMNS: usize = 5;
 
 const MOTION_DESC: S = if cfg!(windows) {
     S::a_reduce_win
@@ -56,7 +56,11 @@ pub fn view(state: &State) -> Element<'_, Message> {
         let mut rows = vec![setting_row::block(
             title(t!(a_looks)),
             t!(a_looks_desc),
-            grid(LOOK_COLUMNS, look_cards(state)),
+            grid_spaced(
+                MINI_COLUMNS,
+                crate::shared::kit::tokens::settings::CARD_GAP,
+                look_cards(state),
+            ),
         )];
         if d.look.theme == LookTheme::Custom {
             rows.extend(custom::rows(state));
@@ -89,20 +93,39 @@ fn mode_row(state: &State) -> Element<'_, Message> {
     .map(|(mode, minis, name, desc)| {
         mode_card(minis, name, desc, d.theme == mode, Message::Theme(mode))
     });
-    setting_row::block(title(t!(ap_mode)), t!(ap_mode_d), grid(3, cards))
+    setting_row::block(
+        title(t!(ap_mode)),
+        t!(ap_mode_d),
+        grid_spaced(3, crate::shared::kit::tokens::settings::CARD_GAP, cards),
+    )
 }
 
 /// The colour themes of one mode (light, or dark) under its heading; the chosen one is the mode's pick.
 fn themes_group<'a>(state: &'a State, light: bool, name: &'a str) -> Element<'a, Message> {
     let picks = &state.draft.appearance;
     let shown = if light { &picks.light } else { &picks.dark };
-    let cards = (THEMES.into_iter().filter(|t| t.light == light)).map(|t| {
+    let items: Vec<_> = THEMES.into_iter().filter(|t| t.light == light).collect();
+    let count = fmt(S::ap_themes_n, &[&items.len()]);
+    let cards = items.into_iter().map(|t| {
         let name = theme_words(t.id).map_or(t.name, |(n, _)| tr(n));
         theme_mini_card(t, name, t.id == shown, Message::ThemePick(t.id))
     });
-    column![title(name), grid(if light { 3 } else { 5 }, cards)]
-        .spacing(crate::shared::kit::tokens::space::GAP)
-        .into()
+    let head = crate::dir_row![
+        title(name),
+        crate::shared::kit::text::sub(crate::shared::kit::tokens::Role::ROW_DESC, count)
+    ]
+    .spacing(crate::shared::kit::tokens::space::ROW_Y)
+    .align_y(iced::Alignment::End);
+    column![
+        head,
+        grid_spaced(
+            MINI_COLUMNS,
+            crate::shared::kit::tokens::settings::CARD_GAP,
+            cards
+        )
+    ]
+    .spacing(crate::shared::kit::tokens::space::ROW_Y)
+    .into()
 }
 
 /// The 12 theme cards (Settings, and onboarding's Look step).
@@ -144,19 +167,14 @@ fn look_cards(state: &State) -> Vec<Element<'_, Message>> {
         .map(|(look, (_, pick))| {
             let chosen = pick == Some(now);
             let on = pick.map(Message::Look);
-            let (name, badge, desc) = look_words(look.id)
-                .map_or((look.name, look.badge, look.desc), |(n, b, d)| {
-                    (tr(n), tr(b), tr(d))
-                });
-            look_card(name, badge, desc, look.preview, chosen, on)
+            let name = look_words(look.id).map_or(look.name, |(n, _, _)| tr(n));
+            look_mini_card(look.preview, name, chosen, on)
         })
         .collect();
     let (a, b) = theme::accent_of(&state.look(LookTheme::Custom));
-    cards.push(look_card(
-        t!(lk_custom),
-        t!(lk_custom_b),
-        t!(lk_custom_d),
+    cards.push(look_mini_card(
         &[a, b],
+        t!(lk_custom),
         now == LookTheme::Custom,
         Some(Message::Look(LookTheme::Custom)),
     ));

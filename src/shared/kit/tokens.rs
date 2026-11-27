@@ -70,6 +70,39 @@ pub mod settings {
     /// An empty state's glyph and its vertical padding (Extensions).
     pub const EMPTY_GLYPH: f32 = 20.0;
     pub const EMPTY_PAD_Y: f32 = 24.0;
+    /// Bottom breathing room inside the page scroll (`r2.css` `.r2 .main .inner`).
+    pub const CONTENT_PAD_BOTTOM: f32 = 48.0;
+    /// Section box corners, outer padding `[y, x]` and caption padding (`r2.css` `.r2 .sec`).
+    pub const SECTION_RADIUS: f32 = 14.0;
+    pub const SECTION_PAD: [f32; 2] = [4.0, 20.0];
+    pub const SECTION_HEAD_TOP: f32 = 15.0;
+    pub const SECTION_HEAD_BOTTOM: f32 = 5.0;
+    /// Vertical padding of a row inside a section (`kit.css` `.sec .row`: 12 px + 36 px = 60 px).
+    pub const ROW_PAD_Y: f32 = 12.0;
+    /// Gap between a block's text and its cards, and between cards in a grid (`extra.css` `.chcs`, `r2.css` `.tgrid`/`.lgrid`).
+    pub const BLOCK_GAP: f32 = 12.0;
+    pub const CARD_GAP: f32 = 12.0;
+    /// Choice card dimensions (`extra.css` `.chc`, `r2.css` `.chc.v`).
+    pub const CHOICE_PAD: f32 = 14.0;
+    pub const CHOICE_TILE: f32 = 36.0;
+    pub const CHOICE_ICON: f32 = 18.0;
+    pub const CHOICE_WIDE_H: f32 = 92.0;
+    pub const CHOICE_TALL_H: f32 = 136.0;
+    /// Appearance mini-window heights (16:10 at 3-col mode and 5-col theme/look widths) and card padding.
+    pub const MINI_MODE_H: f32 = 140.0;
+    pub const MINI_THEME_H: f32 = 82.0;
+    pub const MINI_CARD_PAD: f32 = 6.0;
+    pub const MINI_CARD_PAD_BOTTOM: f32 = 8.0;
+    pub const MINI_CARD_GAP: f32 = 7.0;
+    /// Demo drawer (`r2.css` `.r2 .sec.exp` / `r2.py` `drawer`).
+    pub const DEMO_W: f32 = 372.0;
+    pub const DEMO_H: f32 = 210.0;
+    pub const DEMO_GAP: f32 = 22.0;
+    pub const DEMO_PAD: f32 = 16.0;
+    /// Offline model list: icon tile, progress bar width, and row spacing (`extra.css` `.mic`, `.dlp`, `.mrow2`).
+    pub const MODEL_TILE: f32 = 30.0;
+    pub const MODEL_BAR_W: f32 = 150.0;
+    pub const NOTE_TILE: f32 = 28.0;
 }
 
 /// Fixed control sizes.
@@ -119,8 +152,14 @@ const fn role(size: f32, weight: Weight) -> Role {
 
 impl Role {
     pub const PAGE_TITLE: Role = role(16.0, Weight::Semibold);
-    /// Settings round 2: a page header's title.
+    /// Settings round 2: a page header's title and subtitle (`r2.css` `.ph h1`, `.ph p`).
     pub const PAGE_HEAD: Role = role(20.0, Weight::Semibold);
+    pub const PAGE_SUB: Role = role(12.5, Weight::Normal);
+    /// Settings round 2: a choice card's title and description (`extra.css` `.chc .ct`, `.chc .cd`).
+    pub const CHOICE_TITLE: Role = role(13.5, Weight::Semibold);
+    pub const CHOICE_DESC: Role = role(12.0, Weight::Normal);
+    /// Settings round 2: a demo block's title (`extra.css` `.rt.big`).
+    pub const DEMO_TITLE: Role = role(15.5, Weight::Semibold);
     pub const ROW_TITLE: Role = role(13.0, Weight::Medium);
     pub const ROW_DESC: Role = role(11.5, Weight::Normal);
     pub const NAV: Role = role(12.5, Weight::Medium);
@@ -180,6 +219,8 @@ pub mod fixed {
     pub const GLASS_LINE: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.25);
     /// rose-400.
     pub const DANGER: Color = Color::from_rgb8(0xfb, 0x71, 0x85);
+    /// amber-400/500 (older version / warning chip).
+    pub const WARN: Color = Color::from_rgb8(0xf5, 0x9e, 0x0b);
     /// The window's close button under the cursor, and its glyph.
     pub const CLOSE_HOVER: Color = Color::from_rgb8(0xc4, 0x2b, 0x1c);
     pub const ON_CLOSE: Color = Color::WHITE;

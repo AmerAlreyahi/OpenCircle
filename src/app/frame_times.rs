@@ -799,7 +799,7 @@ fn a_playing_preview_redraws_only_its_stage() {
     let frames = clip_damage(settings::Section::Ai);
     // the clip's place: past the sidebar, under the preview's heading and
     // above the page's rows
-    let stage = |r: &Rectangle| r.x > SIDEBAR_RIGHT && r.y >= 150.0 && r.y + r.height <= 560.0;
+    let stage = |r: &Rectangle| r.x > SIDEBAR_RIGHT && r.y >= 140.0 && r.y + r.height <= 560.0;
     assert!(frames.iter().all(|d| !d.is_empty()), "the clip plays");
     for r in frames.iter().flatten() {
         assert!(stage(r), "{r:?} outside the stage");

@@ -77,10 +77,6 @@ strings! {
         | "إعادة تعيين";
     c_open_history: "Open History"
         | "فتح السجل";
-    c_hide_preview: "Hide preview"
-        | "إخفاء المعاينة";
-    c_show_preview: "Show preview"
-        | "إظهار المعاينة";
     c_play_preview: "Play preview"
         | "تشغيل المعاينة";
     c_preview: "Preview"
@@ -247,10 +243,6 @@ strings! {
         | "بسيط";
     lk_custom: "Custom"
         | "مخصّص";
-    lk_custom_d: "Your own colours, glow, dim, corners and edges"
-        | "ألوانك وتوهّجك وتعتيمك وزواياك وحوافك";
-    lk_custom_b: "Yours"
-        | "لك";
     cu_colours: "Colours"
         | "الألوان";
     cu_colours_desc: "The screen edge, selection and buttons"
@@ -2939,4 +2931,38 @@ strings! {
         | "كتم الميكروفون";
     rec_unmute: "Unmute microphone"
         | "إلغاء كتم الميكروفون";
+    ap_themes_n: "{} themes"
+        | "{} سمات";
+    t_read_lang: "Reading language"
+        | "لغة القراءة";
+    t_read_lang_d: "Other scripts use a reader that downloads the first time you need it"
+        | "تستخدم اللغات الأخرى قارئًا يُنزَّل عند أول حاجة إليه";
+    tr_m_ok: "Up to date"
+        | "محدّث";
+    tr_m_old: "Older version"
+        | "إصدار أقدم";
+    tr_m_update: "Update"
+        | "تحديث";
+    tr_m_stopped: "Stopped"
+        | "متوقف";
+    tr_m_add: "Add a language pair"
+        | "إضافة زوج لغات";
+    tr_m_add_hint: "Pick a source and target above; its model downloads the first time you translate it."
+        | "اختر لغتَي المصدر والهدف أعلاه؛ يُنزَّل النموذج عند أول ترجمة.";
+    tr_m_none: "No offline language pairs installed yet."
+        | "لا توجد أزواج لغات مثبتة بعد.";
+    tr_pair_meta: "{} → {} · {} MB"
+        | "{} → {} · {} م.ب";
+    gl_note: "Glossaries show up only on a game screen, as a button on the translate pill. They never apply in a browser or a normal app."
+        | "تظهر القواميس على شاشة اللعبة فقط، كزر في شريط الترجمة. ولا تُطبَّق في المتصفح أو التطبيقات العادية.";
+    c_hide_demo: "Hide the demo"
+        | "إخفاء العرض";
+    c_how_it_works: "How it works"
+        | "كيف يعمل";
+    c_replay: "Replay"
+        | "إعادة";
+    c_clip_of: "{} of {}"
+        | "{} من {}";
+    c_demo_note: "Plays once when opened, then rests on the last frame. A still picture if you reduce motion."
+        | "يُعرض مرة عند الفتح ثم يتوقف عند اللقطة الأخيرة. صورة ثابتة إن قلّلت الحركة.";
 }

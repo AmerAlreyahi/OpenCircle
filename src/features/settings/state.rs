@@ -1285,7 +1285,7 @@ impl State {
             win_h: 720.0,
             win_w: 1280.0,
             fetching: Vec::new(),
-            opened: Vec::new(),
+            opened: previews::HEROES.iter().map(|h| h.key).collect(),
             failed: Vec::new(),
             print_screen_taken: crate::shared::platform::hotkey::windows_snips_print_screen(),
             kept: None,

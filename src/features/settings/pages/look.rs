@@ -55,11 +55,10 @@ pub(in crate::features::settings) fn page_for(
             Some(Message::Section(Section::Appearance)),
         ),
     );
-    let mut page = column![section(Some(t!(l_sec)), None, || vec![selection, themes])]
-        .spacing(crate::shared::kit::tokens::settings::SECTION_GAP);
-    // (Windows has two readers to choose from; Linux has the one)
-    if windows {
-        page = page.push(super::text_reading::view(state));
-    }
-    page.into()
+    column![
+        section(Some(t!(l_sec)), None, || vec![selection, themes]),
+        super::text_reading::section_for(state, windows),
+    ]
+    .spacing(crate::shared::kit::tokens::settings::SECTION_GAP)
+    .into()
 }

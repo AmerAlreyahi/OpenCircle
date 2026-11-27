@@ -221,16 +221,16 @@ pub fn view(state: &State, beside: bool) -> Option<Element<'_, Message>> {
             let shown = !hidden(state, h);
             let player = (state.players.iter()).find(|(k, _)| *k == h.key);
             let has_clip = player.is_some() || !chosen(h, &state.draft).is_empty();
-            // one "Play preview" row: folded, or opened but its clips aren't on disk (a failed
-            // download: the same button tries again); the click is the only download trigger
+            let on_disk = player.is_some_and(|(_, p)| p.on_disk());
+            // Play preview downloads only on click (privacy rule); once on disk, Replay restarts it.
             let play = match () {
                 _ if !has_clip => None,
                 _ if state.fetching.contains(&h.key) => Some((t!(c_downloading), None)),
                 _ if !shown => Some((t!(c_play_preview), Some(Message::Preview(h.key, true)))),
-                _ if state.failed.contains(&h.key) && !reduced => {
+                _ if !on_disk && !reduced => {
                     Some((t!(c_play_preview), Some(Message::Fetch(h.key))))
                 }
-                _ => None,
+                _ => Some((t!(c_replay), Some(Message::Preview(h.key, true)))),
             };
             hero(hero::Hero {
                 title: tr(h.title),
@@ -240,21 +240,27 @@ pub fn view(state: &State, beside: bool) -> Option<Element<'_, Message>> {
                 shown,
                 toggle: has_clip.then_some(Message::Preview(h.key, !shown)),
                 play,
+                beside,
                 note: state.failed.contains(&h.key).then_some(tr(FAILED)),
                 frame: player.and_then(|(_, p)| p.frame().cloned()),
                 width: (state.stage.clone(), state.scale, state.win_h),
                 pager: player.and_then(|(_, p)| {
                     let (at, n) = p.position();
-                    (n > 1).then_some((at, n, Message::Step(h.key, -1), Message::Step(h.key, 1)))
+                    (n > 1).then_some((
+                        at,
+                        n,
+                        Message::Step(h.key, -1),
+                        Message::Step(h.key, 1),
+                        crate::shared::app_language::fmt(S::c_clip_of, &[&(at + 1), &n]),
+                    ))
                 }),
                 words: hero::Words {
+                    eyebrow: t!(c_how_it_works),
                     labs: t!(nav_labs),
                     no_shortcut: t!(c_no_shortcut),
-                    hide: t!(c_hide_preview),
-                    show: t!(c_show_preview),
-                    preview: t!(c_preview),
                     previous: t!(c_prev_preview),
                     next: t!(c_next_preview),
+                    default_note: t!(c_demo_note),
                 },
             })
         })
