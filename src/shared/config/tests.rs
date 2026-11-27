@@ -41,6 +41,8 @@ fn a_v0_1_0_file_loads_without_warnings_and_gets_labs_defaults() {
             ("translate", "Alt+Shift+T"),
             ("snip", "Alt+A"),
             ("song_search", "Ctrl+Shift+M"),
+            ("record-video", "Alt+Shift+R"),
+            ("record-audio", "Alt+Shift+M"),
         ]
     );
 }
@@ -56,7 +58,7 @@ fn migrating_backs_the_old_file_up_once_then_rewrites_it_as_the_new_schema() {
     // The file is the new schema now, with every old value and the Labs switches.
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(
-        text.contains("version = 16") && text.contains("[labs]"),
+        text.contains("version = 17") && text.contains("[labs]"),
         "{text}"
     );
     let (again, w) = Config::load_from(&path);
@@ -93,13 +95,13 @@ fn a_backup_is_never_overwritten() {
 
 #[test]
 fn a_current_file_is_left_alone_and_a_missing_one_is_not_created() {
-    let (dir, path) = config_with("current", "version = 16\n[labs]\nsong = true\n");
+    let (dir, path) = config_with("current", "version = 17\n[labs]\nsong = true\n");
     let (c, w) = Config::load_from(&path);
     assert!(w.is_empty() && c.labs.song, "{w:?}");
     assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no backup");
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
-        "version = 16\n[labs]\nsong = true\n"
+        "version = 17\n[labs]\nsong = true\n"
     );
     let gone = dir.join("none.toml");
     Config::load_from(&gone);
@@ -340,9 +342,13 @@ fn defaults_match_design() {
         "the OS language (English in tests), never Arabic by default"
     );
     assert_eq!(c.ai.provider, Provider::Browser);
-    assert_eq!(c.quick_actions.len(), 7);
+    assert_eq!(c.quick_actions.len(), 9);
     // Song search: unbound, history off.
-    let song = c.quick_actions.last().unwrap();
+    let song = c
+        .quick_actions
+        .iter()
+        .find(|q| q.action == "song_search")
+        .unwrap();
     assert_eq!(
         (song.action.as_str(), song.shortcut.as_str()),
         ("song_search", "")
@@ -478,7 +484,7 @@ fn the_bar_anchor_reads_back_and_bad_values_fall_back() {
 /// editor is `snip::annotate` now): `[editor]` keys, `snip.after = "editor"`.
 #[test]
 fn editor_keys_and_snip_after_values_stay_as_written() {
-    let text = "version = 16\n[editor]\ntool = \"step\"\ncolour = \"#AF52DE\"\nsize = \"thin\"\n\n[snip]\nafter = \"editor\"\n";
+    let text = "version = 17\n[editor]\ntool = \"step\"\ncolour = \"#AF52DE\"\nsize = \"thin\"\n\n[snip]\nafter = \"editor\"\n";
     let (c, w) = Config::parse(text);
     assert!(w.is_empty(), "{w:?}");
     assert_eq!(c.snip.after, SnipAfter::Editor);
@@ -586,7 +592,7 @@ fn save_then_load_round_trips() {
     );
     // The remembered tool and options: read back; a bad one is its default.
     let (c, w) = Config::parse(
-        "version = 16\n[editor]\ntool = \"step\"\ncolour = \"#AF52DE\"\nsize = \"thin\"\ntext_size = 38\n\
+        "version = 17\n[editor]\ntool = \"step\"\ncolour = \"#AF52DE\"\nsize = \"thin\"\ntext_size = 38\n\
              outline = true\nfill = false\nblur_size = \"thick\"\nblur_cell = \"thin\"\n",
     );
     assert!(w.is_empty(), "{w:?}");
@@ -759,7 +765,7 @@ fn an_old_auto_search_migrates_to_wait_with_a_backup() {
         assert_eq!(std::fs::read_to_string(&backup).unwrap(), old, "{tag}");
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(
-            text.contains("version = 16") && !text.contains("search_with"),
+            text.contains("version = 17") && !text.contains("search_with"),
             "{text}"
         );
         assert!(!text.contains("[results]"), "{text}");
@@ -1035,7 +1041,7 @@ fn broken_toml_and_wrong_shapes_do_not_crash() {
     assert_eq!(c, Config::unreadable());
     assert_eq!(w.len(), 1);
     assert!(w[0].contains("AI is off"), "{w:?}");
-    let (c, w) = Config::parse("ai = 4\nquick_actions = \"x\"\nversion = 17\n");
+    let (c, w) = Config::parse("ai = 4\nquick_actions = \"x\"\nversion = 18\n");
     assert_eq!(c, Config::unreadable());
     assert_eq!(w.len(), 3, "{w:?}");
     assert!(
@@ -1075,7 +1081,11 @@ fn quick_actions_are_validated_per_entry() {
             shortcut = "Ctrl+Alt+9"
             "#,
     );
-    assert_eq!(c.quick_actions.len(), 3);
+    assert_eq!(
+        c.quick_actions.len(),
+        5,
+        "3 and the two recording keys schema 17 adds"
+    );
     assert_eq!(c.quick_actions[0].target, Target::LastRegion);
     assert_eq!(c.quick_actions[1].shortcut, "", "bad shortcut = unbound");
     assert_eq!(c.quick_actions[1].target, Target::FullScreen);
@@ -1154,7 +1164,7 @@ fn the_default_file_is_byte_for_byte_the_frozen_one() {
     let path = dir.join("config.toml");
     Config::default().save_to(&path).unwrap();
     let written = std::fs::read_to_string(&path).unwrap();
-    let frozen = fixture("default-v16.toml").replace("target = \"ar\"", "target = \"en\"");
+    let frozen = fixture("default-v17.toml").replace("target = \"ar\"", "target = \"en\"");
     assert_eq!(written, frozen);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -1193,7 +1203,7 @@ fn older_files_load_quietly_and_schema_9_drops_the_retired_keys() {
         assert_eq!(kept(&again), kept(&c), "v{n}");
         assert_eq!(c, Config::parse(text).0, "v{n}");
         let saved: Table = fs_text(&path).parse().unwrap();
-        assert_eq!(saved["version"].as_integer(), Some(16));
+        assert_eq!(saved["version"].as_integer(), Some(17));
         let labs = saved["labs"].as_table().unwrap();
         assert!(
             !labs.contains_key("snip") && !labs.contains_key("editor"),
@@ -1261,7 +1271,7 @@ fn a_v4_file_still_has_every_v3_key() {
     want.look.theme = LookTheme::Spectrum;
     want.translate.target = "ar".into(); // stored: kept
     assert_eq!(c, want);
-    let frozen = fixture("default-v16.toml").replace("sapphire_glow", "spectrum");
+    let frozen = fixture("default-v17.toml").replace("sapphire_glow", "spectrum");
     assert_eq!(fs_text(&path), frozen);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -1304,7 +1314,11 @@ fn schema_8_moves_snip_off_print_screen() {
         entry("Ctrl+PrintScreen", "full_screen")
     );
     let (c, w) = Config::parse(&text);
-    assert!(w.is_empty() && c.quick_actions.is_empty(), "{w:?}");
+    let only_recording = c
+        .quick_actions
+        .iter()
+        .all(|q| q.action.starts_with("record-"));
+    assert!(w.is_empty() && only_recording, "{w:?}");
 }
 
 /// Schema 7: the old default max_edge (1568) moves to Original once, with a backup;
@@ -1386,7 +1400,7 @@ fn a_v3_file_migrates_once_with_a_bak_v3() {
     assert_eq!(look(&fs_text(&path)), look(old));
     let text = fs_text(&path);
     for want in [
-        "version = 16",
+        "version = 17",
         "glass_effect = false",
         "theme = \"aurora\"",
         "[appearance]",
@@ -1426,7 +1440,7 @@ fn a_stored_copy_moves_to_both_once_editor_and_both_stay() {
             assert_eq!(c.snip.after, want, "{name} (labs snip {snip})");
             assert_eq!(fs_text(&dir.join(format!("config.toml.bak-v{n}"))), text);
             let saved: Table = fs_text(&path).parse().unwrap();
-            assert_eq!(saved["version"].as_integer(), Some(16));
+            assert_eq!(saved["version"].as_integer(), Some(17));
             assert!(saved["labs"].get("snip").is_none(), "dropped (schema 9)");
             let (again, _) = Config::load_from(&path);
             assert_eq!(again.snip.after, want, "migrated once");
@@ -1450,7 +1464,7 @@ fn schema_10_moves_both_to_editor_once_with_a_backup() {
     assert!(w.is_empty(), "{w:?}");
     assert_eq!(c.snip.after, SnipAfter::Editor);
     assert_eq!(fs_text(&dir.join("config.toml.bak-v9")), v9);
-    assert_eq!(fs_text(&path), fixture("default-v16.toml"));
+    assert_eq!(fs_text(&path), fixture("default-v17.toml"));
     let _ = std::fs::remove_dir_all(dir);
     // a v10 file keeps a deliberate "both"
     let (c, w) = Config::parse("version = 10\n[snip]\nafter = \"both\"\n");
@@ -1483,7 +1497,7 @@ fn schema_12_moves_the_translate_keys_off_the_browsers_shortcuts() {
     assert_eq!(key(&c, false).as_deref(), Some("Alt+Shift+T"));
     assert_eq!(key(&c, true).as_deref(), Some("Alt+Shift+L"));
     assert_eq!(fs_text(&dir.join("config.toml.bak-v11")), v11);
-    assert_eq!(fs_text(&path), fixture("default-v16.toml"));
+    assert_eq!(fs_text(&path), fixture("default-v17.toml"));
     let _ = std::fs::remove_dir_all(dir);
     // a user's own key stays; a v12 file keeps even the old default
     let own = v11.replace("Ctrl+Shift+T", "Ctrl+Alt+9");
@@ -1520,7 +1534,7 @@ fn schema_11_stops_writing_the_ignored_keys_with_a_backup() {
     for gone in ["widget_theme", "search_with", "activation_glow", "animate"] {
         assert!(!text.contains(gone), "{gone}: {text}");
     }
-    assert!(text.contains("version = 16"), "{text}");
+    assert!(text.contains("version = 17"), "{text}");
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -1646,7 +1660,7 @@ fn w123_ac6_the_steps_panels_open_and_pinned_are_remembered_additively() {
     let d = Config::parse("").0.snip.studio;
     assert!(!d.library && !d.pinned, "closed, not pinned, by default");
     assert!(!Config::default().studio.steps_on_start);
-    let (c, w) = Config::parse("version = 16\n[snip]\nlong_max = 5000\n");
+    let (c, w) = Config::parse("version = 17\n[snip]\nlong_max = 5000\n");
     assert!(w.is_empty(), "{w:?}");
     assert!(
         !c.snip.studio.library && !c.snip.studio.pinned,
@@ -1747,14 +1761,14 @@ fn an_older_file_without_studio_loads_clean_and_bad_studio_values_take_defaults(
     assert!(w.is_empty(), "{w:?}");
     assert_eq!(c.studio, StudioPrefs::default());
     let (c, w) = Config::parse(
-        "version = 16\n[studio]\nquality = 12\nrecent_files = 7\nfile_name = \"a:b\"\nfolder = \"rel\"\nsnap = false\n",
+        "version = 17\n[studio]\nquality = 12\nrecent_files = 7\nfile_name = \"a:b\"\nfolder = \"rel\"\nsnap = false\n",
     );
     assert_eq!((c.studio.quality, c.studio.recent_files), (85, 10));
     assert_eq!(c.studio.file_name, STUDIO_FILE_NAME);
     assert!(!c.studio.snap, "the valid key is kept");
     assert_eq!(c.studio.folder, "");
     assert_eq!(w.len(), 4, "{w:?}");
-    let (c, w) = Config::parse("version = 16\n[studio]\nfile_name = \"\"\n");
+    let (c, w) = Config::parse("version = 17\n[studio]\nfile_name = \"\"\n");
     assert_eq!(
         (c.studio.file_name.as_str(), w.len()),
         (STUDIO_FILE_NAME, 1)
@@ -1767,13 +1781,13 @@ fn the_walkthrough_transition_is_remembered_and_checked() {
     let d = Config::default().snip.studio;
     assert_eq!((d.walk_transition, d.walk_ms), (1, 500));
     let (c, w) =
-        Config::parse("version = 16\n[snip.studio]\nwalk_transition = 4\nwalk_ms = 1000\n");
+        Config::parse("version = 17\n[snip.studio]\nwalk_transition = 4\nwalk_ms = 1000\n");
     assert!(w.is_empty(), "{w:?}");
     assert_eq!(
         (c.snip.studio.walk_transition, c.snip.studio.walk_ms),
         (4, 1000)
     );
-    let (c, w) = Config::parse("version = 16\n[snip.studio]\nwalk_transition = 9\nwalk_ms = 123\n");
+    let (c, w) = Config::parse("version = 17\n[snip.studio]\nwalk_transition = 9\nwalk_ms = 123\n");
     assert_eq!(
         (c.snip.studio.walk_transition, c.snip.studio.walk_ms),
         (1, 500)
@@ -1900,7 +1914,7 @@ fn f11_the_v14_default_file_migrates_to_the_v15_one_with_an_identical_backup() {
     );
     assert_eq!(
         fs_text(&path),
-        fixture("default-v16.toml"),
+        fixture("default-v17.toml"),
         "the new schema's default"
     );
     let _ = std::fs::remove_dir_all(dir);
@@ -2115,4 +2129,46 @@ fn saving_show_tips_keeps_the_tips_seen_meanwhile() {
     now.tips.seen.insert(0, "bar_f1".into());
     let saved = rebase(&now, &known, &known);
     assert_eq!(saved.tips.seen, ["bar_f1", "snip_move"]);
+}
+
+/// R04-60: schema 17 adds the two recording keys to a file that has none (a key someone else holds
+/// stays theirs: the new action starts unbound); a file that has them keeps its own; a new file has them.
+#[test]
+fn r04_60_the_recording_keys_join_older_files_once() {
+    let keys = |c: &Config| -> Vec<(String, String)> {
+        (c.quick_actions.iter())
+            .filter(|q| q.action.starts_with("record-"))
+            .map(|q| (q.action.to_string(), q.shortcut.clone()))
+            .collect()
+    };
+    let old = "version = 16\n[[quick_actions]]\naction = \"snip\"\nshortcut = \"Alt+A\"\ntarget = \"circle\"\n";
+    assert_eq!(
+        keys(&Config::parse(old).0),
+        [
+            ("record-video".into(), "Alt+Shift+R".into()),
+            ("record-audio".into(), "Alt+Shift+M".into())
+        ]
+    );
+    let taken = "version = 16\n[[quick_actions]]\naction = \"snip\"\nshortcut = \"Alt+Shift+R\"\ntarget = \"circle\"\n";
+    assert_eq!(
+        keys(&Config::parse(taken).0)[0],
+        ("record-video".into(), String::new()),
+        "the user's key stays"
+    );
+    // the same chord spelled another way is still taken (compared as chords, not as text)
+    let respelled = "version = 16\n[[quick_actions]]\naction = \"snip\"\nshortcut = \"shift+ALT+r\"\ntarget = \"circle\"\n";
+    assert_eq!(
+        keys(&Config::parse(respelled).0)[0],
+        ("record-video".into(), String::new()),
+        "Shift+Alt+R is Alt+Shift+R"
+    );
+    let own = "version = 16\n[[quick_actions]]\naction = \"record-video\"\nshortcut = \"Ctrl+Alt+V\"\ntarget = \"circle\"\n";
+    let c = Config::parse(own).0;
+    assert_eq!(keys(&c)[0].1, "Ctrl+Alt+V");
+    assert_eq!(keys(&c).len(), 2, "only the missing one is added");
+    assert_eq!(keys(&Config::default()).len(), 2);
+    assert_eq!(
+        Config::parse("version = 17\n").0.quick_actions.len(),
+        Config::default().quick_actions.len()
+    );
 }

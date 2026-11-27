@@ -62,6 +62,10 @@ pub enum Fault {
     /// The captured stream ended (window closed, screen off): stop and keep.
     #[cfg_attr(not(test), allow(dead_code))]
     StreamEnded,
+    /// This PC cannot encode (GStreamer's plugins are missing): nothing was recorded.
+    Encoder,
+    /// The file could not be written (disk error, encoder error): stop, keep what is valid.
+    WriteFailed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,8 +98,14 @@ pub enum Event {
     Keep,
     /// The bar's bin.
     Discard,
+    /// A recording an earlier run left behind is offered on the thumbnail.
+    Offer {
+        audio_only: bool,
+    },
     /// The sink wrote and closed the file.
     Flushed,
+    /// The file could not be written or closed cleanly: the card says so, what is valid stays.
+    FlushFailed(Fault),
     /// An S2 action ran, or S2 slid away; or the error card was closed.
     Dismiss,
     #[cfg_attr(not(test), allow(dead_code))] // R-04's recorder raises it
@@ -212,6 +222,9 @@ impl State {
             (S::AskKeep { .. }, E::Dismiss) => same,
             // stopping: a second Stop is nothing; the flush ends in the thumbnail
             (S::Stopping { audio_only }, E::Flushed) => (S::Result { audio_only }, None),
+            (S::Stopping { .. }, E::FlushFailed(f)) => (S::Error(f), None),
+            // leftovers of an earlier run, offered once (nothing is recorded)
+            (S::Idle, E::Offer { audio_only }) => (S::Result { audio_only }, None),
             (S::Result { .. }, E::Dismiss | E::Esc) => (S::Idle, None),
             // the error card (a fault before recording: nothing was kept) closed
             (S::Error(_), E::Dismiss | E::Esc) => (S::Idle, Some(Effect::DeleteTemp)),
@@ -288,6 +301,19 @@ mod tests {
             (PAU, E::Fault(Fault::StreamEnded), STOPPING, Some(F::Flush)),
             (REC, E::Fault(Fault::Mic), STOPPING, Some(F::Flush)),
             (REC, E::StartFailed(Fault::Mic), S::Error(Fault::Mic), None),
+            (
+                STOPPING,
+                E::FlushFailed(Fault::WriteFailed),
+                S::Error(Fault::WriteFailed),
+                None,
+            ),
+            (REC, E::Fault(Fault::WriteFailed), STOPPING, Some(F::Flush)),
+            (
+                S::Idle,
+                E::Offer { audio_only: false },
+                S::Result { audio_only: false },
+                None,
+            ),
             (PAU, E::Fault(Fault::Refused), STOPPING, Some(F::Flush)),
             (
                 S::Asking,

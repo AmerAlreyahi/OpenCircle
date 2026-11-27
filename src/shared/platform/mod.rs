@@ -6,6 +6,9 @@ pub(crate) mod audio;
 pub(crate) mod autostart;
 pub(crate) mod capture;
 pub(crate) mod dcomp;
+pub(crate) mod encode;
+#[cfg(target_os = "linux")]
+pub(crate) mod gst;
 pub(crate) mod hotkey;
 pub(crate) mod layer_shell;
 pub(crate) mod monitor;

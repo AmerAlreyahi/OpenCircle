@@ -2,6 +2,7 @@
 //! the desktop session's kind, the user's language.
 
 pub mod cpu;
+pub mod disk;
 pub mod locale;
 pub mod mem;
 pub mod open;

@@ -912,6 +912,8 @@ mod tests {
                 "quick-ai_explain-circle",
                 "quick-copy_text-circle",
                 "quick-snip-circle",
+                "quick-record-video-circle",
+                "quick-record-audio-circle",
             ]
         );
         assert_eq!(b[0].shortcut, "Ctrl+Shift+Space");

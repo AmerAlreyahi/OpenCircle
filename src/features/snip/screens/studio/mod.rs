@@ -206,6 +206,8 @@ pub enum Msg {
     OpenPrefs,
     Prefs(preferences::Msg),
     OpenRecent(PathBuf),
+    /// The start screen's "Show recordings": the folder of unsaved recordings in the file manager.
+    ShowRecordings,
     Recent(Vec<(PathBuf, image::Handle)>, Vec<String>),
     /// The window's px per logical px, and its size.
     Scale(f32),
@@ -353,6 +355,8 @@ pub enum Outcome {
 
     /// Read this file (a dropped or recent one) and `open` it.
     Read(PathBuf),
+    /// Open this folder in the file manager.
+    ShowFolder,
     /// Ctrl+V: a picture on the clipboard opens; else the editor pastes its text
     /// at that point (`paste_text`).
     Paste(Option<Point>),
@@ -431,6 +435,8 @@ pub struct Studio {
     saved: Option<u64>,
     asking: Option<After>,
     pub(super) recent: Vec<(PathBuf, image::Handle)>,
+    /// Recent holds unsaved recordings: the start screen's "Show recordings" row.
+    pub(super) recordings: bool,
     pub(super) hovered: bool,
     /// The stage's scroll offset, and Ctrl held (see `Msg::Scrolled`).
     offset: Vector,
@@ -581,6 +587,7 @@ impl Studio {
             saved: Some(0),
             asking: None,
             recent: Vec::new(),
+            recordings: false,
             hovered: false,
             offset: Vector::ZERO,
             pending_scroll: None,
@@ -1423,6 +1430,7 @@ impl Studio {
                     | Msg::DropSettle(_)
                     | Msg::Picked(_)
                     | Msg::OpenRecent(_)
+                    | Msg::ShowRecordings
                     | Msg::Wheel { .. }
                     | Msg::Act(_)
                     | Msg::EditText
@@ -1674,6 +1682,7 @@ impl Studio {
                 self.next_name = file_name(&path);
                 Outcome::Read(path)
             }
+            Msg::ShowRecordings => Outcome::ShowFolder,
             Msg::Recent(recent, info) => {
                 self.recent_info = info;
                 self.recent = recent;
@@ -2777,3 +2786,10 @@ pub fn recent_line(path: &std::path::Path) -> String {
 
 #[cfg(test)]
 mod tests;
+
+impl Studio {
+    /// Recent holds unsaved recordings (read once when the Studio opens).
+    pub fn set_recordings(&mut self, there: bool) {
+        self.recordings = there;
+    }
+}

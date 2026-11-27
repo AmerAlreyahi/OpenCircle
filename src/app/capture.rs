@@ -50,6 +50,9 @@ impl App {
         // the window in front, before the overlay takes the focus: every capture
         // (main, Translate, Live, Snip) tells the glossary which game it is
         capture::window_rect::remember_focused();
+        // every capture starts as no recording's pick (the record-video key sets it after this
+        // call): a pick that was never finished can never turn Alt+A into a recording
+        self.record_next = false;
         self.captures = self.captures.wrapping_add(1);
         let n = self.captures;
         self.capturing = Some(n);
@@ -239,6 +242,7 @@ impl App {
         let shot = match shot {
             Ok(shot) => shot,
             Err(e) => {
+                self.record_next = false;
                 self.unshow();
                 crate::log!("capture failed: {e}");
                 self.next = Purpose::Search;
@@ -325,6 +329,7 @@ impl App {
                 snip.read_later(reader, UIA_WINDOWS); // else dropped: no controls
             }
             snip.live_pin = std::mem::take(&mut self.live_next);
+            snip.record = std::mem::take(&mut self.record_next);
             self.o.purpose = Purpose::Snip(Box::new(snip));
             extras = self.snip_extras(read);
             if let Some(tool) = tool {

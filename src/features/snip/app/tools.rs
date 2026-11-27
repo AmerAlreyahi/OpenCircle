@@ -266,6 +266,18 @@ fn moving(times: &mut Vec<std::time::Instant>, now: std::time::Instant) {
     }
 }
 
+/// The recording thumbnail's Copy: the file on the clipboard as a file list.
+pub(crate) fn copy_file(file: &std::path::Path) -> bool {
+    copy::files(&[file.to_path_buf()]).is_ok()
+}
+
+/// The folder a saved recording goes to (General's save folder, else the default one).
+pub(crate) fn save_folder() -> Option<std::path::PathBuf> {
+    crate::features::circle::actions::save::start_folder(
+        &crate::shared::config::current().general.save_folder,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Instant;

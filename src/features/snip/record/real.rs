@@ -1,0 +1,245 @@
+//! The real recorder (R-04): what the state machine's `Effect`s do for a live recording. It owns
+//! the capture session (`session`) and the temp file (`files`), and answers as the fake did
+//! (`Event::StartFailed` when the start fails, `Event::Flushed` when the file is closed).
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver};
+use std::time::Duration;
+
+use super::files;
+use super::session::{AudioIn, Chan, Config, FrameSource, OpenSource, Session};
+use super::state::Fault;
+use crate::shared::platform::audio::{self, Kind};
+use crate::shared::platform::capture::frames::Frames;
+use crate::shared::platform::encode::{self, FileSink, VideoFmt};
+
+/// Free space a recording needs to begin (R-01: >= 2 GB).
+pub const START_FREE: u64 = 2 * 1024 * 1024 * 1024;
+
+/// What to record.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Request {
+    pub audio_only: bool,
+    /// The area in physical desktop px (video).
+    pub region: Option<(i32, i32, u32, u32)>,
+    /// The microphone: none = off, `Some(None)` = the OS default, `Some(Some(id))` = that one.
+    pub mic: Option<Option<String>>,
+    /// The PC's sound.
+    pub sound: bool,
+    pub fps: u32,
+}
+
+/// Why a start failed: what the card says, and the words for the log and the Encoder card.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Failure {
+    pub fault: Fault,
+    pub note: String,
+}
+
+/// How a recording ended: its file when there is one worth keeping, and what went wrong.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Flushed {
+    pub file: Option<PathBuf>,
+    pub error: Option<String>,
+}
+
+/// A frame source over the platform's screen frames.
+struct Screen(Frames);
+
+impl FrameSource for Screen {
+    fn next(&mut self, wait: Duration) -> Result<Option<Vec<u8>>, String> {
+        self.0.next(wait).map_err(|e| e.to_string())
+    }
+    fn fast(&self) -> bool {
+        self.0.fast()
+    }
+}
+
+/// A sound input of the platform.
+struct Sound(audio::Input);
+
+impl AudioIn for Sound {
+    fn read(&mut self, wait: Duration) -> Result<Option<(Vec<f32>, std::time::Instant)>, String> {
+        match self.0.read(wait) {
+            Ok(p) => Ok(p.map(|p| (p.samples, p.at))),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+}
+
+/// Where a started recording is.
+struct Live {
+    session: Session,
+    path: PathBuf,
+}
+
+#[derive(Default)]
+pub struct Real {
+    live: Option<Live>,
+    /// The file of the last recording (kept after `flush`, until saved or deleted).
+    pub file: Option<PathBuf>,
+}
+
+impl Real {
+    /// Opens the encoder, the screen and the sound and starts at once.
+    pub fn begin(&mut self, req: &Request) -> Result<(), Failure> {
+        let refused = |why: String| {
+            crate::log!("[opencircle] recording could not start: {why}");
+            Failure {
+                fault: Fault::Refused,
+                note: why,
+            }
+        };
+        let plan = encode::plan(!req.audio_only).map_err(|why| {
+            crate::log!("[opencircle] recording could not start: {why}");
+            Failure {
+                fault: Fault::Encoder,
+                note: why,
+            }
+        })?;
+        let dir = files::temp_dir();
+        std::fs::create_dir_all(&dir).map_err(|e| refused(e.to_string()))?;
+        let free = crate::shared::platform::sys::disk::free_bytes(&dir);
+        if free.is_some_and(|f| f < START_FREE) {
+            return Err(refused("less than 2 GB free".into()));
+        }
+        let path = files::new_temp(&dir, plan.ext);
+        let mut inputs: Vec<(Chan, Box<dyn AudioIn>)> = Vec::new();
+        if let Some(id) = &req.mic {
+            let input = audio::Input::open(Kind::Mic(id.clone())).map_err(|e| {
+                crate::log!("[opencircle] recording: no microphone ({e})");
+                Failure {
+                    fault: Fault::Mic,
+                    note: e.to_string(),
+                }
+            })?;
+            inputs.push((Chan::Mic, Box::new(Sound(input))));
+        }
+        if req.sound {
+            match audio::Input::open(Kind::System) {
+                Ok(input) => inputs.push((Chan::Sound, Box::new(Sound(input)))),
+                Err(e) => crate::log!("[opencircle] recording: no system sound ({e})"),
+            }
+        }
+        let (video, source) = match (req.audio_only, req.region) {
+            // (even sides: the picture the capture is asked for is what is pushed)
+            (false, Some((x, y, w, h))) => {
+                let (w, h) = (w & !1, h & !1);
+                let fmt = VideoFmt::of(w, h, req.fps.max(1));
+                let open: OpenSource =
+                    Box::new(move || Box::new(Screen(Frames::open((x, y, w, h)))));
+                (Some(fmt), Some(open))
+            }
+            (false, None) => return Err(refused("no area to record".into())),
+            (true, _) => (None, None),
+        };
+        let sink = FileSink::open(&path, video, !inputs.is_empty()).map_err(refused)?;
+        let probe = path.clone();
+        let mut cfg = Config::new(
+            req.fps,
+            Box::new(move || crate::shared::platform::sys::disk::free_bytes(&probe)),
+        );
+        cfg.frame_bytes = video.map(|v| v.frame_bytes());
+        let session = Session::start(cfg, source, inputs, sink);
+        self.live = Some(Live { session, path });
+        self.file = None;
+        Ok(())
+    }
+
+    pub fn pause(&self) {
+        if let Some(l) = &self.live {
+            l.session.pause();
+        }
+    }
+
+    pub fn resume(&self) {
+        if let Some(l) = &self.live {
+            l.session.resume();
+        }
+    }
+
+    pub fn mute_mic(&self, muted: bool) {
+        if let Some(l) = &self.live {
+            l.session.mute_mic(muted);
+        }
+    }
+
+    pub fn mute_sound(&self, muted: bool) {
+        if let Some(l) = &self.live {
+            l.session.mute_sound(muted);
+        }
+    }
+
+    pub fn level(&self) -> f32 {
+        self.live.as_ref().map_or(0.0, |l| l.session.level())
+    }
+
+    /// Why the input ended, if it did (disk low, stream ended, microphone gone, write failed).
+    pub fn fault(&self) -> Option<Fault> {
+        self.live.as_ref().and_then(|l| l.session.fault())
+    }
+
+    /// Stops, writes the rest and closes the file ON A WORKER (the UI never waits for the
+    /// encoder, a desktop's dialog or a slow disk): the answer comes on the receiver.
+    pub fn flush_async(&mut self) -> Option<Receiver<Flushed>> {
+        let live = self.live.take()?;
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(finish(live));
+        });
+        Some(rx)
+    }
+
+    /// Stops what runs and deletes the temp file (the bin; leaving the error card): the stop is
+    /// on a worker, the UI does not wait.
+    pub fn discard(&mut self) {
+        // marked first (cheap): a worker killed before it deletes leaves a file the next start
+        // sweeps, not one it offers
+        if let Some(path) = self.file.take() {
+            files::mark_discarded(&path);
+            delete(&path);
+            files::unmark(&path);
+        }
+        if let Some(live) = self.live.take() {
+            files::mark_discarded(&live.path);
+            std::thread::spawn(move || {
+                let path = live.path.clone();
+                let _ = live.session.stop();
+                delete(&path);
+                files::unmark(&path);
+            });
+        }
+    }
+}
+
+/// Stops the session and says how it ended.
+fn finish(live: Live) -> Flushed {
+    let error = match live.session.stop() {
+        Ok(stats) => {
+            crate::log!(
+                "[opencircle] recording done: {} frames, {} dropped, {:?}",
+                stats.frames,
+                stats.dropped,
+                stats.elapsed
+            );
+            None
+        }
+        Err(e) => {
+            crate::log!("[opencircle] recording ended with an error: {e}");
+            Some(e)
+        }
+    };
+    let kept = std::fs::metadata(&live.path).is_ok_and(|m| m.len() > 0);
+    Flushed {
+        file: kept.then_some(live.path),
+        error,
+    }
+}
+
+fn delete(path: &Path) {
+    if let Err(e) = std::fs::remove_file(path) {
+        crate::log!(
+            "[opencircle] recording: could not delete {}: {e}",
+            path.display()
+        );
+    }
+}

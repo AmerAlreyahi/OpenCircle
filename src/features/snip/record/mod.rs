@@ -4,6 +4,9 @@
 
 pub mod clock;
 pub mod fake;
+pub mod files;
 pub mod mix;
 pub mod placement;
+pub mod real;
+pub mod session;
 pub mod state;

@@ -23,6 +23,9 @@ pub enum QuickId {
     /// Snip's screen tools (`features::snip::screens::tools`).
     ColourPicker,
     Ruler,
+    /// Recording (v0.6.0): `record-video` picks what to record, `record-audio` starts at once.
+    RecordVideo,
+    RecordAudio,
     /// Any other well-formed id in the config: kept and written back as it was, but
     /// it runs nothing.
     Other(String),
@@ -30,7 +33,7 @@ pub enum QuickId {
 
 impl QuickId {
     /// Every id the app knows.
-    pub const KNOWN: [QuickId; 14] = [
+    pub const KNOWN: [QuickId; 16] = [
         QuickId::Lens,
         QuickId::Ai,
         QuickId::Text,
@@ -45,6 +48,8 @@ impl QuickId {
         QuickId::LivePin,
         QuickId::ColourPicker,
         QuickId::Ruler,
+        QuickId::RecordVideo,
+        QuickId::RecordAudio,
     ];
 
     pub fn as_str(&self) -> &str {
@@ -63,6 +68,8 @@ impl QuickId {
             QuickId::LivePin => "live_pin",
             QuickId::ColourPicker => "colour_picker",
             QuickId::Ruler => "ruler",
+            QuickId::RecordVideo => "record-video",
+            QuickId::RecordAudio => "record-audio",
             QuickId::Other(name) => name,
         }
     }
@@ -136,6 +143,10 @@ mod tests {
             "snip",
             "song_search",
             "live_pin",
+            "colour_picker",
+            "ruler",
+            "record-video",
+            "record-audio",
         ];
         for (id, name) in QuickId::KNOWN.iter().zip(names) {
             assert_eq!(id.as_str(), name);

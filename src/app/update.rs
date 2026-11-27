@@ -21,6 +21,7 @@ use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::features::snip::snip_more as more;
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;
+use crate::shared::platform::hotkey::QuickId;
 use crate::shared::platform::monitor;
 use crate::{
     app::windows,
@@ -64,6 +65,7 @@ impl App {
                 ask.map(Message::Windows)
             }
             Message::Trigger(Trigger::Quit) => {
+                self.record_shutdown();
                 self.on_quit();
                 iced::exit()
             }
@@ -138,6 +140,14 @@ impl App {
             {
                 self.toggle_live(at)
             }
+            // the recording keys: start, or the same key again = stop and save
+            Message::Trigger(Trigger::Quick(at, qa))
+                if matches!(qa.action, QuickId::RecordVideo | QuickId::RecordAudio) =>
+            {
+                self.record_key(qa.action == QuickId::RecordAudio, at)
+            }
+            // Esc while recording stops and asks Keep / Discard
+            Message::Escape if self.rec.state.is_live() => self.record_esc(),
             Message::Live(msg) => self.on_live(msg),
             Message::Translate(id, msg) => self.on_translate(id, msg),
             Message::ChatHome(screen) => self.chat_home(screen),
@@ -248,6 +258,7 @@ impl App {
             Message::Chosen(..) => Task::none(),
             Message::Grabbed(n) => self.grabbed(n),
             Message::CaptureTimedOut(n) if self.capturing == Some(n) => {
+                self.record_next = false;
                 self.unshow();
                 crate::log!(
                     "capture failed: no screenshot after {} s; try again",
@@ -266,6 +277,7 @@ impl App {
                 Task::none()
             }
             Message::Escape if self.capturing.is_some() => {
+                self.record_next = false;
                 self.unshow();
                 crate::log!("[opencircle] capture cancelled");
                 self.capturing = None;

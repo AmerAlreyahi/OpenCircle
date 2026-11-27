@@ -221,6 +221,8 @@ pub struct Windows {
     )>,
     record_spot: Option<Point>,
     record_grabbed: bool,
+    /// A recording is on without a bar (the tray is its bar): the beat still runs.
+    pub record_beat: bool,
 }
 
 /// What `Windows::leave_frame` took out of capture number `capture`'s grab.
@@ -2521,7 +2523,7 @@ impl Windows {
             },
             // the recording's timer and the thumbnail's slide-away run on a slow beat
             match (&self.record_bar, &self.record_thumb) {
-                (None, None) => Subscription::none(),
+                (None, None) if !self.record_beat => Subscription::none(),
                 _ => crate::shared::kit::motion::beats().map(Msg::RecordTick),
             },
             // the Updating pill's logo turns (a frame clock only while it shows)

@@ -1969,3 +1969,8 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
 - R-11 no menu during long capture (lead default 2026-11-27, owner may reverse): the Snip right-click / Menu-key area menu does not
   open while a long capture runs (the capture cuts a hole over the area, so a menu there would be invisible yet take keys); the
   toolbar's Copy / Save / Pin finish the capture as before.
+
+- Unsaved recordings in Recent (lead default 2026-11-27, owner may reverse; refines Q4): an unsaved recording goes to Recent captures
+  only when Recent is on; Recent's recordings are pruned by the same count limit as pictures and are visible from the Studio's Recent
+  panel (listed, or a "Show recordings" row). With Recent off nothing is moved there: an unsaved one is deleted when its thumbnail
+  slides away, crash leftovers stay in the temp folder and are offered at the next start.

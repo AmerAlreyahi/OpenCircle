@@ -217,6 +217,8 @@ pub(crate) struct App {
     pub(crate) timed: bool,
     /// The next snip capture is the live pin quick action's (`Snip::live_pin`).
     pub(crate) live_next: bool,
+    /// The next snip pick is a screen recording's (`Snip::record`).
+    pub(crate) record_next: bool,
     /// The next snip opens this screen tool (its quick action).
     pub(crate) tool_next: Option<crate::features::snip::screens::tools::Which>,
     /// The next snip opens this image picked: a step of the Steps strip, to
@@ -298,7 +300,9 @@ impl App {
             Some(installed) => app.on_installed(installed),
             None => Task::none(),
         };
-        (app, Task::batch([open, start, notes]))
+        // what a crash left of a recording: offered once on the thumbnail
+        let left = app.record_offer_leftovers();
+        (app, Task::batch([open, start, notes, left]))
     }
 
     /// Nothing open yet (the overlay window `overlay` pre-created, hidden).
@@ -332,6 +336,7 @@ impl App {
             live: None,
             timed: false,
             live_next: false,
+            record_next: false,
             tool_next: None,
             picked_next: None,
             cast: None,

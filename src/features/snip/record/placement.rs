@@ -50,6 +50,8 @@ pub enum Row {
     /// Error card: what went wrong (notes), then the ways out.
     ErrMic,
     ErrRefused,
+    ErrEncoder,
+    ErrWrite,
     Retry,
     /// Record without the microphone.
     Fix,
@@ -63,12 +65,14 @@ pub struct Ctx {
     pub audio_only: bool,
     /// The microphone's name ("Off" / empty: none).
     pub device: String,
+    /// The user's key for the action that started this recording ("" = none bound).
+    pub key: String,
 }
 
 impl Row {
     /// Every row (the desktop's menu builds one item for each).
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    pub const ALL: [Row; 14] = [
+    pub const ALL: [Row; 16] = [
         Row::Pause,
         Row::Resume,
         Row::Stop,
@@ -80,6 +84,8 @@ impl Row {
         Row::Keep,
         Row::ErrMic,
         Row::ErrRefused,
+        Row::ErrEncoder,
+        Row::ErrWrite,
         Row::Retry,
         Row::Fix,
         Row::Dismiss,
@@ -87,7 +93,10 @@ impl Row {
 
     /// A note, not a button: shown greyed.
     pub fn is_note(self) -> bool {
-        matches!(self, Row::Device | Row::ErrMic | Row::ErrRefused)
+        matches!(
+            self,
+            Row::Device | Row::ErrMic | Row::ErrRefused | Row::ErrEncoder | Row::ErrWrite
+        )
     }
 
     /// Its text; the mic row says what a press does, Stop shows the start key.
@@ -95,14 +104,8 @@ impl Row {
         match self {
             Row::Pause => crate::t!(rec_pause).into(),
             Row::Resume => crate::t!(rec_resume).into(),
-            Row::Stop => {
-                let key = if ctx.audio_only {
-                    "Alt+Shift+M"
-                } else {
-                    "Alt+Shift+R"
-                };
-                format!("{} ({key})", crate::t!(rec_stop))
-            }
+            Row::Stop if ctx.key.is_empty() => crate::t!(rec_stop).into(),
+            Row::Stop => format!("{} ({})", crate::t!(rec_stop), ctx.key),
             Row::Discard => crate::t!(rec_discard).into(),
             Row::Mic if ctx.muted => crate::t!(rec_unmute).into(),
             Row::Mic => crate::t!(rec_mute).into(),
@@ -113,6 +116,8 @@ impl Row {
             Row::Keep => crate::t!(rec_keep).into(),
             Row::ErrMic => crate::t!(rec_err_mic).into(),
             Row::ErrRefused => crate::t!(rec_err_refused).into(),
+            Row::ErrEncoder => crate::t!(rec_err_encoder).into(),
+            Row::ErrWrite => crate::t!(rec_err_write).into(),
             Row::Retry => crate::t!(rec_try_again).into(),
             Row::Fix => crate::t!(rec_err_mic_fix).into(),
         }
@@ -127,6 +132,8 @@ pub fn tray_rows(state: State) -> Vec<Row> {
         State::Paused { .. } => vec![Row::Resume, Row::Stop, Row::Discard, Row::Mic, Row::Device],
         State::AskKeep { .. } => vec![Row::Keep, Row::Discard],
         State::Error(Fault::Mic) => vec![Row::ErrMic, Row::Retry, Row::Fix, Row::Dismiss],
+        State::Error(Fault::Encoder) => vec![Row::ErrEncoder, Row::Dismiss],
+        State::Error(Fault::WriteFailed) => vec![Row::ErrWrite, Row::Dismiss],
         State::Error(_) => vec![Row::ErrRefused, Row::Retry, Row::Dismiss],
         State::Idle | State::Stopping { .. } | State::Result { .. } => Vec::new(),
     }
@@ -189,17 +196,23 @@ mod tests {
         assert!(tray_rows(State::Stopping { audio_only: false }).is_empty());
     }
 
-    /// R02-22: Stop shows the start key (R for video, M for audio); the device row names the mic.
+    /// R02-22 / R04-53: Stop shows the user's REAL start key (rebound or none), the device row names the mic.
     #[test]
     fn stop_shows_its_key_and_the_device_row_the_mic() {
-        let video = Ctx::default();
+        let video = Ctx {
+            key: "Ctrl+Alt+V".into(),
+            ..Ctx::default()
+        };
         let audio = Ctx {
             audio_only: true,
             device: "Built-in".into(),
+            key: "Alt+Shift+M".into(),
             ..Ctx::default()
         };
-        assert!(Row::Stop.label(&video).ends_with("(Alt+Shift+R)"));
+        assert!(Row::Stop.label(&video).ends_with("(Ctrl+Alt+V)"));
         assert!(Row::Stop.label(&audio).ends_with("(Alt+Shift+M)"));
+        let unbound = Ctx::default();
+        assert_eq!(Row::Stop.label(&unbound), crate::t!(rec_stop));
         assert_eq!(Row::Device.label(&audio), "Built-in");
         let muted = Ctx {
             muted: true,

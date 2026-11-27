@@ -9,7 +9,7 @@ use iced::widget::image;
 use crate::shared::picture::Crop;
 
 /// Captures kept on disk, and shown in the strip.
-const HISTORY: usize = 20;
+pub(crate) const HISTORY: usize = 20;
 const STRIP: usize = 8;
 
 /// `<user data dir>/opencircle/recent` (Windows: %LOCALAPPDATA%).
@@ -54,7 +54,44 @@ pub(super) fn keep(dir: &Path, crop: &Crop, limit: usize) -> Result<PathBuf, Str
     for old in list(dir).into_iter().skip(limit) {
         let _ = std::fs::remove_file(old);
     }
+    // the same pass keeps the recordings (`<dir>/recordings`) to the same count
+    prune_recordings(&recordings_in(dir), limit);
     Ok(path)
+}
+
+/// Where recordings that nobody saved wait in Recent: `<recent>/recordings`.
+pub fn recordings_dir() -> Option<PathBuf> {
+    dir().map(|d| recordings_in(&d))
+}
+
+fn recordings_in(dir: &Path) -> PathBuf {
+    dir.join("recordings")
+}
+
+/// Keeps the newest `limit` files of `dir` (by their time, then name), oldest first out: the same
+/// rule as the captures, so recordings never grow without a bound.
+pub fn prune_recordings(dir: &Path, limit: usize) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .flatten()
+        .filter(|e| e.path().is_file())
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    files.sort();
+    files.reverse(); // newest first
+    for (_, old) in files.into_iter().skip(limit) {
+        let _ = std::fs::remove_file(old);
+    }
+}
+
+/// Recent is on and recordings wait in it (the Studio's "Show recordings" row).
+pub fn has_recordings() -> bool {
+    crate::shared::config::current().snip.history
+        && recordings_dir()
+            .and_then(|d| std::fs::read_dir(d).ok())
+            .is_some_and(|mut d| d.any(|e| e.is_ok_and(|e| e.path().is_file())))
 }
 
 /// The kept captures, newest first.
@@ -147,6 +184,35 @@ mod tests {
         assert_eq!(open(&now[0]).unwrap().rgba, vec![22; 16]);
         clear_dir(&dir);
         assert!(!dir.exists() && list(&dir).is_empty());
+    }
+
+    /// R04-64: the recordings folder is pruned in the pictures' own pass (same count, oldest
+    /// out first), and a clear takes it too.
+    #[test]
+    fn r04_64_recordings_are_pruned_with_the_pictures() {
+        let dir = std::env::temp_dir().join(format!("oc-recent-rec-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let rec = recordings_in(&dir);
+        std::fs::create_dir_all(&rec).unwrap();
+        for n in 0..6 {
+            std::fs::write(rec.join(format!("rec-{n}.mp4")), b"x").unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(15));
+        }
+        let shot = Crop {
+            width: 1,
+            height: 1,
+            rgba: vec![1; 4],
+        };
+        keep(&dir, &shot, 4).unwrap(); // a picture is kept: the same pass prunes the recordings
+        let left: Vec<_> = std::fs::read_dir(&rec).unwrap().flatten().collect();
+        assert_eq!(left.len(), 4, "newest 4 stay");
+        assert!(!rec.join("rec-0.mp4").exists() && rec.join("rec-5.mp4").exists());
+        assert!(
+            list(&dir).len() == 1,
+            "the recordings folder is not a picture"
+        );
+        clear_dir(&dir);
+        assert!(!rec.exists());
     }
 
     #[test]

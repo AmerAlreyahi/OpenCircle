@@ -72,6 +72,12 @@ fn recent(s: &Studio) -> Option<Element<'_, Msg>> {
     )
 }
 
+/// The "Show recordings" row: a quiet labelled button.
+fn labelled_quiet(words: &'static str, m: Msg) -> Element<'static, Msg> {
+    let w = button::labelled_width(words);
+    button::labelled(super::view::OPEN, words, w, Kind::Elevated, false, Some(m))
+}
+
 /// Opened alone: recent pictures, Open, Paste, or drop a picture.
 pub fn view(s: &Studio) -> Element<'_, Msg> {
     let labelled = |glyph, words: &'static str, kind, m| {
@@ -107,6 +113,10 @@ pub fn view(s: &Studio) -> Element<'_, Msg> {
         card = card.push(buttons);
         if let Some(r) = recent(s) {
             card = card.push(r);
+        }
+        // recordings nobody saved wait in Recent: one quiet row opens their folder
+        if s.recordings {
+            card = card.push(labelled_quiet(t!(st_show_recordings), Msg::ShowRecordings));
         }
     }
     let zone = match s.hovered {

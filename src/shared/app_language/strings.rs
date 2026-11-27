@@ -1105,6 +1105,10 @@ strings! {
         | "رمز API";
     k_live_pin: "Live pin"
         | "التثبيت الحي";
+    k_record_video: "Record video"
+        | "تسجيل فيديو";
+    k_record_audio: "Record audio"
+        | "تسجيل صوت";
 
     // ---- added in part 2a (tray, update widgets, pills, model downloads,
     // translate pill and picker, backend states): for the owner's native review ----
@@ -2451,6 +2455,8 @@ strings! {
         | "الموضع";
     st_more: "More"
         | "المزيد";
+    st_show_recordings: "Show recordings"
+        | "إظهار التسجيلات";
     st_recent_pictures: "Recent pictures"
         | "الصور الأخيرة";
     st_opacity: "Opacity"
@@ -2959,6 +2965,16 @@ strings! {
         | "سجّل بدون ميكروفون";
     rec_try_again: "Try again"
         | "حاول مرة أخرى";
+    rec_err_encoder: "Recording needs GStreamer plugins"
+        | "التسجيل يحتاج إلى إضافات GStreamer";
+    rec_err_encoder_d: "Install your system's GStreamer video plugins, then try again."
+        | "ثبّت إضافات GStreamer للفيديو في نظامك ثم حاول مرة أخرى.";
+    rec_err_write: "The recording could not be written"
+        | "تعذّرت كتابة التسجيل";
+    rec_err_write_d: "What was recorded before is kept. Check the disk, then record again."
+        | "ما سُجّل قبل ذلك محفوظ. تحقق من القرص ثم سجّل مرة أخرى.";
+    rec_save_failed: "The recording could not be saved. It is kept: press Save to try again."
+        | "تعذّر حفظ التسجيل. هو محفوظ: اضغط حفظ للمحاولة مرة أخرى.";
     rec_err_refused: "Your desktop said no"
         | "رفض سطح المكتب الطلب";
     rec_err_refused_d: "Nothing was recorded. Try again and allow screen sharing when the desktop asks."

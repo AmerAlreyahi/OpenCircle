@@ -10,7 +10,7 @@
 //! nothing linked; where it's missing the Screenshot portal stays (`portal.rs`).
 //! The restore token lives in the app's data folder (never the config file, never
 //! logged); GNOME hands out a new one on every start.
-use std::ffi::{CStr, CString, c_char, c_int, c_void};
+use std::ffi::c_int;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -18,10 +18,11 @@ use std::time::Duration;
 
 use gtk::gio::prelude::*;
 use gtk::gio::{Cancellable, DBusCallFlags, DBusConnection, UnixFDList};
-use gtk::glib::{self, ToVariant, Variant, VariantDict, variant::ObjectPath};
+use gtk::glib::{ToVariant, Variant, VariantDict, variant::ObjectPath};
 
 use super::portal::{DESKTOP, PATH, handle_path, request};
 use super::{CaptureError, Frame};
+use crate::shared::platform::gst::{Gst, Pipe};
 
 const IFACE: &str = "org.freedesktop.portal.ScreenCast";
 
@@ -42,7 +43,7 @@ pub fn wanted(conn: &DBusConnection) -> bool {
         .and_then(|v| v.str().map(str::to_string));
         let version = property(conn, DESKTOP, PATH, IFACE, "version").and_then(|v| v.get::<u32>());
         let wanted = asks_every_time(&desktop, shell.as_deref(), version.unwrap_or(0))
-            && Gst::get().is_some();
+            && pipewire_gst().is_some();
         if wanted {
             crate::log!(
                 "[opencircle] captures through the ScreenCast portal (asked once, then silent)"
@@ -119,7 +120,7 @@ pub fn can_stream(conn: &DBusConnection) -> bool {
     static CAN: OnceLock<bool> = OnceLock::new();
     *CAN.get_or_init(|| {
         let version = property(conn, DESKTOP, PATH, IFACE, "version").and_then(|v| v.get::<u32>());
-        let can = version.unwrap_or(0) >= 4 && Gst::get().is_some();
+        let can = version.unwrap_or(0) >= 4 && pipewire_gst().is_some();
         if !can {
             crate::log!(
                 "[opencircle] no long capture: it needs the ScreenCast portal (v4+) and GStreamer's PipeWire source"
@@ -151,7 +152,7 @@ impl Cast {
     /// Streams the monitor holding `region` (physical desktop px, as the frozen
     /// frame's). The desktop shows its dialog only without a valid token.
     pub fn start(region: (i32, i32, u32, u32)) -> Result<Cast, String> {
-        let gst = Gst::get().ok_or("GStreamer's PipeWire source is missing")?;
+        let gst = pipewire_gst().ok_or("GStreamer's PipeWire source is missing")?;
         let conn = super::portal::session_bus()?;
         let session = Session::start(&conn, Source::Monitors)?;
         let (stream, area) =
@@ -180,7 +181,7 @@ impl Cast {
     /// a `size` px monitor's full-screen window (a game): its own pixels,
     /// never what lies over it.
     pub fn window(size: (u32, u32)) -> Result<Cast, String> {
-        let gst = Gst::get().ok_or("GStreamer's PipeWire source is missing")?;
+        let gst = pipewire_gst().ok_or("GStreamer's PipeWire source is missing")?;
         let conn = super::portal::session_bus()?;
         let session = Session::start(&conn, Source::Window)?;
         let node = session.streams.first().ok_or("no window shared")?.node;
@@ -262,7 +263,7 @@ pub fn can_stream_window() -> bool {
         let types = property(&conn, DESKTOP, PATH, IFACE, "AvailableSourceTypes")
             .and_then(|v| v.get::<u32>())
             .unwrap_or(0);
-        let can = types & Source::Window.types() != 0 && Gst::get().is_some();
+        let can = types & Source::Window.types() != 0 && pipewire_gst().is_some();
         crate::log!(
             "[opencircle] screen cast of one window: {}",
             if can { "yes" } else { "no" }
@@ -477,10 +478,10 @@ impl Session {
 
     /// One frame of each stream, in stream order.
     fn grab(&self) -> Result<Vec<(Stream, Frame)>, CaptureError> {
-        let gst = Gst::get().ok_or("GStreamer's PipeWire source is missing")?;
+        let gst = pipewire_gst().ok_or("GStreamer's PipeWire source is missing")?;
         let fd = self.remote()?;
         let frames = (self.streams.iter())
-            .map(|s| gst.frame(fd, s.node).map(|f| (*s, f)))
+            .map(|s| frame(gst, fd, s.node).map(|f| (*s, f)))
             .collect::<Result<Vec<_>, String>>()
             .map_err(|e| format!("Wayland screen cast: {e}"));
         // SAFETY: `fd` is our own duplicate from the fd list (pipewiresrc dups it again).
@@ -635,240 +636,33 @@ fn forget_token(path: &Path) {
     let _ = std::fs::remove_file(path);
 }
 
-/// The few GStreamer calls one frame needs, from `libgstreamer-1.0.so.0` (dlopen).
-struct Gst {
-    parse_launch: unsafe extern "C" fn(*const c_char, *mut *mut glib::ffi::GError) -> *mut c_void,
-    bin_get_by_name: unsafe extern "C" fn(*mut c_void, *const c_char) -> *mut c_void,
-    set_state: unsafe extern "C" fn(*mut c_void, c_int) -> c_int,
-    sample_get_buffer: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
-    sample_get_caps: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
-    caps_get_structure: unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void,
-    structure_get_int: unsafe extern "C" fn(*mut c_void, *const c_char, *mut c_int) -> c_int,
-    buffer_map: unsafe extern "C" fn(*mut c_void, *mut MapInfo, c_int) -> c_int,
-    buffer_unmap: unsafe extern "C" fn(*mut c_void, *mut MapInfo),
-    mini_object_unref: unsafe extern "C" fn(*mut c_void),
-    object_unref: unsafe extern "C" fn(*mut c_void),
-}
-
-/// GstMapInfo (ABI-stable since GStreamer 1.0).
-#[repr(C)]
-struct MapInfo {
-    memory: *mut c_void,
-    flags: c_int,
-    data: *mut u8,
-    size: usize,
-    maxsize: usize,
-    user_data: [*mut c_void; 4],
-    reserved: [*mut c_void; 4],
-}
-
-const STATE_NULL: c_int = 1;
-const STATE_PLAYING: c_int = 4;
-const MAP_READ: c_int = 1;
 /// How long one frame may take to arrive (a screen cast's first frame takes ~0.1 s).
 const FRAME_WAIT: Duration = Duration::from_secs(3);
 
-impl Gst {
-    /// Loaded and initialised once; `None` without GStreamer or its PipeWire source.
-    fn get() -> Option<&'static Gst> {
-        static GST: OnceLock<Option<Gst>> = OnceLock::new();
-        GST.get_or_init(|| {
-            let gst = Gst::load();
-            if gst.is_none() {
-                crate::log!(
-                    "[opencircle] no GStreamer PipeWire source: screenshots ask every time"
-                );
-            }
-            gst
-        })
-        .as_ref()
-    }
-
-    // (each symbol's type is the field or binding it lands in)
-    #[allow(clippy::missing_transmute_annotations)]
-    fn load() -> Option<Gst> {
-        // SAFETY: dlopen by name; the handle is kept open (never closed), so the
-        // symbols stay valid for the process. Each is cast to its C signature.
-        unsafe {
-            let lib = libc::dlopen(c"libgstreamer-1.0.so.0".as_ptr(), libc::RTLD_NOW);
-            if lib.is_null() {
-                return None;
-            }
-            let sym = |name: &CStr| {
-                let p = libc::dlsym(lib, name.as_ptr());
-                (!p.is_null()).then_some(p)
-            };
-            macro_rules! f {
-                ($name:literal) => {
-                    std::mem::transmute::<*mut c_void, _>(sym($name)?)
-                };
-            }
-            let init: unsafe extern "C" fn(*mut c_int, *mut c_void, *mut c_void) -> c_int =
-                f!(c"gst_init_check");
-            let find: unsafe extern "C" fn(*const c_char) -> *mut c_void =
-                f!(c"gst_element_factory_find");
-            let gst = Gst {
-                parse_launch: f!(c"gst_parse_launch"),
-                bin_get_by_name: f!(c"gst_bin_get_by_name"),
-                set_state: f!(c"gst_element_set_state"),
-                sample_get_buffer: f!(c"gst_sample_get_buffer"),
-                sample_get_caps: f!(c"gst_sample_get_caps"),
-                caps_get_structure: f!(c"gst_caps_get_structure"),
-                structure_get_int: f!(c"gst_structure_get_int"),
-                buffer_map: f!(c"gst_buffer_map"),
-                buffer_unmap: f!(c"gst_buffer_unmap"),
-                mini_object_unref: f!(c"gst_mini_object_unref"),
-                object_unref: f!(c"gst_object_unref"),
-            };
-            if init(
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-            ) == 0
-            {
-                return None;
-            }
-            let factory = find(c"pipewiresrc".as_ptr());
-            if factory.is_null() {
-                return None;
-            }
-            (gst.object_unref)(factory);
-            Some(gst)
+/// GStreamer with its PipeWire source; `None` without either (logged once).
+fn pipewire_gst() -> Option<&'static Gst> {
+    static GST: OnceLock<Option<&'static Gst>> = OnceLock::new();
+    *GST.get_or_init(|| {
+        let gst = Gst::get().filter(|g| g.has("pipewiresrc"));
+        if gst.is_none() {
+            crate::log!("[opencircle] no GStreamer PipeWire source: screenshots ask every time");
         }
-    }
-
-    /// One RGBA frame of PipeWire node `node` on the remote `fd`.
-    fn frame(&'static self, fd: c_int, node: u32) -> Result<Frame, String> {
-        let pipe = self.launch(&pipeline(fd, node))?;
-        let sample = pipe.pull(FRAME_WAIT);
-        if sample.is_null() {
-            return Err("no frame from the screen cast".to_string());
-        }
-        // SAFETY: a live sample, unreffed after the copy.
-        unsafe {
-            let frame = self.copy(sample);
-            (self.mini_object_unref)(sample);
-            frame
-        }
-    }
-
-    /// `line` parsed and playing; stopped and freed when the `Pipe` goes.
-    fn launch(&'static self, line: &str) -> Result<Pipe, String> {
-        let line = CString::new(line).expect("no NUL in the pipeline");
-        // SAFETY: plain GStreamer C API use; what is taken is unreffed (`Pipe::drop`).
-        unsafe {
-            let mut error = std::ptr::null_mut();
-            let pipe = (self.parse_launch)(line.as_ptr(), &mut error);
-            if !error.is_null() {
-                let why = CStr::from_ptr((*error).message)
-                    .to_string_lossy()
-                    .into_owned();
-                glib::ffi::g_error_free(error);
-                if !pipe.is_null() {
-                    (self.object_unref)(pipe);
-                }
-                return Err(format!("GStreamer: {why}"));
-            }
-            let sink = (self.bin_get_by_name)(pipe, c"sink".as_ptr());
-            let pipe = Pipe {
-                gst: self,
-                pipe,
-                sink,
-            };
-            if sink.is_null() {
-                return Err("GStreamer: no sink".into());
-            }
-            (self.set_state)(pipe.pipe, STATE_PLAYING);
-            Ok(pipe)
-        }
-    }
-
-    /// SAFETY: `sample` is a live GstSample.
-    unsafe fn copy(&self, sample: *mut c_void) -> Result<Frame, String> {
-        unsafe { self.read(sample, rgba_rows) }
-    }
-
-    /// `take` over the sample's mapped bytes and its width and height.
-    /// SAFETY: `sample` is a live GstSample.
-    unsafe fn read<T>(
-        &self,
-        sample: *mut c_void,
-        take: impl FnOnce(&[u8], u32, u32) -> Result<T, String>,
-    ) -> Result<T, String> {
-        unsafe {
-            let caps = (self.sample_get_caps)(sample);
-            let buffer = (self.sample_get_buffer)(sample);
-            if caps.is_null() || buffer.is_null() {
-                return Err("empty frame".into());
-            }
-            let s = (self.caps_get_structure)(caps, 0);
-            let (mut w, mut h) = (0, 0);
-            (self.structure_get_int)(s, c"width".as_ptr(), &mut w);
-            (self.structure_get_int)(s, c"height".as_ptr(), &mut h);
-            let mut map: MapInfo = std::mem::zeroed();
-            if (self.buffer_map)(buffer, &mut map, MAP_READ) == 0 {
-                return Err("frame not readable".into());
-            }
-            let bytes = std::slice::from_raw_parts(map.data, map.size);
-            let taken = take(bytes, w.max(0) as u32, h.max(0) as u32);
-            (self.buffer_unmap)(buffer, &mut map);
-            taken
-        }
-    }
+        gst
+    })
 }
 
-/// A playing pipeline and its appsink; stopped and freed on drop.
-struct Pipe {
-    gst: &'static Gst,
-    pipe: *mut c_void,
-    sink: *mut c_void,
-}
-
-// SAFETY: GStreamer objects are thread-safe; a `Pipe` is used by one thread at a time.
-unsafe impl Send for Pipe {}
-
-impl Pipe {
-    /// The sink's next sample within `wait` (null: none came; the caller unrefs it).
-    fn pull(&self, wait: Duration) -> *mut c_void {
-        let mut sample: *mut c_void = std::ptr::null_mut();
-        // SAFETY: `sink` is a live appsink (`launch`).
-        unsafe {
-            glib::gobject_ffi::g_signal_emit_by_name(
-                self.sink as *mut _,
-                c"try-pull-sample".as_ptr(),
-                wait.as_nanos() as u64,
-                &mut sample as *mut *mut c_void,
-            );
-        }
-        sample
+/// One RGBA frame of PipeWire node `node` on the remote `fd`.
+fn frame(gst: &'static Gst, fd: c_int, node: u32) -> Result<Frame, String> {
+    let pipe = gst.launch(&pipeline(fd, node))?;
+    let sample = pipe.pull(FRAME_WAIT);
+    if sample.is_null() {
+        return Err("no frame from the screen cast".to_string());
     }
-
-    /// The stream ended (the user stopped sharing in the desktop's menu).
-    fn ended(&self) -> bool {
-        let mut eos: glib::ffi::gboolean = 0;
-        // SAFETY: a live appsink; "eos" is its boolean property, the list ends with NULL.
-        unsafe {
-            glib::gobject_ffi::g_object_get(
-                self.sink as *mut _,
-                c"eos".as_ptr(),
-                &mut eos as *mut glib::ffi::gboolean,
-                std::ptr::null::<c_char>(),
-            );
-        }
-        eos != 0
-    }
-}
-
-impl Drop for Pipe {
-    fn drop(&mut self) {
-        // SAFETY: ours from `launch`, freed once.
-        unsafe {
-            (self.gst.set_state)(self.pipe, STATE_NULL);
-            if !self.sink.is_null() {
-                (self.gst.object_unref)(self.sink);
-            }
-            (self.gst.object_unref)(self.pipe);
-        }
+    // SAFETY: a live sample, unreffed after the copy.
+    unsafe {
+        let frame = gst.read(sample, rgba_rows);
+        (gst.mini_object_unref)(sample);
+        frame
     }
 }
 

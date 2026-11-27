@@ -441,6 +441,10 @@ impl App {
                 self.select(area);
                 self.live_pin(area)
             }
+            // the record-video key: the picked area is recorded (Ready bar, then 3-2-1)
+            Some(pick::Next::Edit(area)) if matches!(&self.o.purpose, Purpose::Snip(s) if s.record) => {
+                self.record_picked(area)
+            }
             Some(pick::Next::Edit(area)) => {
                 self.select(area);
                 self.snip_captured(None, true)

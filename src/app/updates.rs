@@ -71,6 +71,8 @@ impl App {
             && self.hiding == Hiding::No
             && !self.windows.busy()
             && !self.windows.studio_dirty() // (busy() holds for an open Studio too)
+            // a recording (the pick, the countdown, recording, saving, the card) is never restarted
+            && self.rec.state == crate::features::snip::record::state::State::Idle
     }
 
     /// The update clock: the pills wait while the user is away and fade on time;
@@ -208,6 +210,8 @@ impl App {
             crate::app::windows::open_url(&w.url);
             return self.windows.update_pill(None).map(Message::Windows);
         };
+        // a recording that runs is closed first (this process exits into the new one)
+        self.record_shutdown();
         match crate::shared::update::restart(&staged, Moment::Button) {
             Ok(()) => {
                 self.update = None; // on its way (a quit meanwhile, e.g. the setup's, says nothing)
@@ -219,7 +223,11 @@ impl App {
             }
             Err(e) => {
                 crate::log!("[opencircle] update {}: {e}", staged.version);
-                self.windows.update_pill(None).map(Message::Windows)
+                // the recording was closed above: the card shows what was kept, no timer runs
+                Task::batch([
+                    self.windows.update_pill(None).map(Message::Windows),
+                    self.record_after_shutdown(),
+                ])
             }
         }
     }

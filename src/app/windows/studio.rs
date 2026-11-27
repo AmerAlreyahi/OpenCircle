@@ -78,6 +78,7 @@ impl Windows {
             s.open(picture);
             let _ = s.take_scroll();
         }
+        s.set_recordings(crate::shared::history::recent::has_recordings());
         self.studio = Some((id, s));
         let strip = self.strip_yields_to_studio();
         self.chrome.insert(id, Default::default());
@@ -364,6 +365,15 @@ impl Windows {
                     self.studio_outcome(Outcome::Read(first)),
                     self.studio_outcome(Outcome::AddPictures(paths)),
                 ])
+            }
+            // the unsaved recordings' folder, in the file manager (off the UI thread)
+            Outcome::ShowFolder => {
+                if let Some(dir) = crate::shared::history::recent::recordings_dir() {
+                    std::thread::spawn(move || {
+                        let _ = crate::shared::platform::sys::open::open_file(&dir);
+                    });
+                }
+                Task::none()
             }
             Outcome::Read(path) => background(move |tx| {
                 let _ = tx.unbounded_send(read_picture(&path));

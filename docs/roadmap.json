@@ -265,7 +265,7 @@
         {
           "id": "R-02",
           "title": "Recording design: the Snip widget per mode (picture tools only for pictures; record bar only for audio/video)",
-          "status": "todo",
+          "status": "done",
           "depends": [
             "N-01",
             "R-01"
@@ -282,7 +282,7 @@
         {
           "id": "R-04",
           "title": "Record video of an area / window / screen with sound (#168)",
-          "status": "todo",
+          "status": "done",
           "depends": [
             "R-02",
             "R-03"
@@ -291,7 +291,7 @@
         {
           "id": "R-05",
           "title": "Record audio only",
-          "status": "todo",
+          "status": "done",
           "depends": [
             "R-03",
             "R-02"

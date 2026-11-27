@@ -93,6 +93,10 @@ pub struct Bar {
     pub fps: u32,
     /// Level bars (0..1) of an audio recording.
     pub levels: Vec<f32>,
+    /// The countdown's number (3, 2, 1) while it runs: it replaces the Record button's words.
+    pub count: Option<u8>,
+    /// The words behind an error (the missing plugins' names): the Encoder card's hint.
+    pub note: String,
 }
 
 impl Bar {
@@ -111,6 +115,8 @@ impl Bar {
             size: (1920, 1080),
             fps: 30,
             levels: Vec::new(),
+            count: None,
+            note: String::new(),
         }
     }
 
@@ -193,7 +199,15 @@ impl Bar {
                 items.push(parts::meta(self.size.0, self.size.1, self.fps_words()));
                 items.push(parts::group_line());
                 items.push(self.device_button());
-                items.push(parts::record_button(t!(rec_record), Msg::Record));
+                items.push(parts::record_button(
+                    match self.count {
+                        Some(3) => "3",
+                        Some(2) => "2",
+                        Some(1) => "1",
+                        _ => t!(rec_record),
+                    },
+                    Msg::Record,
+                ));
                 items.push(tip(
                     icon_button::quiet_close(false, Some(Msg::Cancel)),
                     t!(rec_cancel),
@@ -319,6 +333,15 @@ impl Bar {
                 t!(rec_err_mic_d),
                 Some((t!(rec_err_mic_fix), Msg::Fix)),
             ),
+            Fault::Encoder => (
+                t!(rec_err_encoder),
+                match self.note.is_empty() {
+                    true => t!(rec_err_encoder_d),
+                    false => self.note.as_str(),
+                },
+                None,
+            ),
+            Fault::WriteFailed => (t!(rec_err_write), t!(rec_err_write_d), None),
             _ => (t!(rec_err_refused), t!(rec_err_refused_d), None),
         };
         let card = error_card::error_card(ErrorCard {
@@ -406,6 +429,40 @@ mod tests {
                 }
             }
         });
+    }
+
+    /// R04-30 (owner shot 2026-11-27): the timer, the microphone's name and the size all sit on
+    /// the bar's one centre line (the microphone's was a little high), in the live bar, the
+    /// ready bar and the audio bar; a long device name is cut, never wider than the bar.
+    #[test]
+    fn r04_30_every_item_shares_the_bars_centre_line() {
+        let mut long = bar(Phase::Recording, false);
+        long.mics = vec!["Microphone Array (Realtek High Definition Audio) Extra Long".into()];
+        let cases = [
+            bar(Phase::Recording, false),
+            bar(Phase::Paused, false),
+            bar(Phase::Ready, false),
+            bar(Phase::Recording, true),
+            long,
+        ];
+        for b in cases {
+            let size = b.size();
+            let spots = shot::texts_at(b.view(RADIUS), size);
+            let mid = crate::shared::kit::recording::BAR_H / 2.0;
+            assert!(spots.len() >= 2, "{:?}: {spots:?}", b.phase);
+            for (r, words) in &spots {
+                if words.is_empty() {
+                    continue;
+                }
+                let centre = r.y + r.height / 2.0;
+                assert!(
+                    (centre - mid).abs() <= 1.0,
+                    "{:?}: {words:?} centred at {centre}, the bar's line is {mid}",
+                    b.phase
+                );
+                assert!(r.x + r.width <= b.bar_width() + 0.5, "{words:?} sticks out");
+            }
+        }
     }
 
     /// R02-2: Pause, Stop, the bin, the mic and Resume send their messages.

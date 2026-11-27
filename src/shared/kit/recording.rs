@@ -209,8 +209,9 @@ pub fn device<'a, M: Clone + 'a>(
     ]
     .spacing(7)
     .align_y(Center);
+    // (a button puts its content at the top: centred in the 34 px, like every other item)
     focus::press(
-        button(face)
+        button(container(face).center_y(Fill))
             .height(SIDE)
             .padding([0.0, 10.0])
             .style(move |_, status| button::Style {

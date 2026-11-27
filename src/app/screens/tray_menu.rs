@@ -172,7 +172,8 @@ mod tests {
             m.update(Msg::Key(Key::Enter)),
             Some(Outcome::Run(Entry::Translate))
         );
-        for _ in 0..5 {
+        // Snip, Record video, Record audio, Studio, What can I do?, Settings, Quit
+        for _ in 0..7 {
             m.update(Msg::Key(Key::Down));
         }
         assert_eq!(
@@ -200,16 +201,16 @@ mod tests {
         assert_eq!(m.update(Msg::Pick(9)), None);
     }
 
-    /// The window is as tall as its rows and the separator: 7 rows (Labs off:
-    /// Snip and Studio are out of Labs) or 9; "What can I do?" and Quit are separated (R-17, the design).
+    /// The window is as tall as its rows and the separators: 9 rows (Labs off) or 11; "What can I do?"
+    /// and Quit are separated (R-17, the design).
     #[test]
     fn the_window_fits_the_rows() {
         let off = Menu::new(&Labs::default(), &Config::default(), false);
-        assert_eq!(off.entries().len(), 7);
-        assert_eq!(off.entries()[4], Entry::WhatCanIDo);
-        assert_eq!(off.size(), Size::new(240.0, 10.0 + 7.0 * 32.0 + 2.0 * 9.0));
+        assert_eq!(off.entries().len(), 9);
+        assert_eq!(off.entries()[6], Entry::WhatCanIDo);
+        assert_eq!(off.size(), Size::new(240.0, 10.0 + 9.0 * 32.0 + 2.0 * 9.0));
         let on = Menu::new(&all_on(), &Config::default(), false);
-        assert_eq!(on.size().height, 10.0 + 9.0 * 32.0 + 2.0 * 9.0);
+        assert_eq!(on.size().height, 10.0 + 11.0 * 32.0 + 2.0 * 9.0);
     }
 
     /// Arabic: the same rows from the table, mirrored (✓ and hints at the left).
@@ -247,7 +248,7 @@ mod tests {
             // an update waits: its row first, a separator under it
             let m = Menu::new(&Labs::default(), &Config::default(), false)
                 .with_update("Restart to update (0.1.5)".into());
-            assert_eq!(m.size().height, 10.0 + 8.0 * 32.0 + 3.0 * 9.0);
+            assert_eq!(m.size().height, 10.0 + 10.0 * 32.0 + 3.0 * 9.0);
             let file = format!("tray-menu-update-{}", theme.id);
             failed.extend(golden::check(
                 "screens",

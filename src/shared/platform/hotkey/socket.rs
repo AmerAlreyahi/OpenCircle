@@ -108,7 +108,7 @@ fn run(action: &str, target: Option<&str>) -> Result<Command, String> {
     let well_formed = (1..=MAX_ACTION).contains(&action.len())
         && action
             .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-');
     if !well_formed || !super::known_action(action) {
         return Err(format!("unknown action \"{}\"", printable(action)));
     }

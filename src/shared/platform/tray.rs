@@ -26,6 +26,9 @@ pub enum Entry {
     Circle,
     Translate,
     Snip,
+    /// Recording (v0.6.0): video picks what to record, audio starts at once (their keys rebind).
+    RecordVideo,
+    RecordAudio,
     /// OpenCircle Studio (opens it on nothing, or brings it forward).
     Studio,
     Live,
@@ -40,11 +43,13 @@ pub enum Entry {
 }
 
 impl Entry {
-    const ALL: [Entry; 10] = [
+    const ALL: [Entry; 12] = [
         Entry::Update,
         Entry::Circle,
         Entry::Translate,
         Entry::Snip,
+        Entry::RecordVideo,
+        Entry::RecordAudio,
         Entry::Studio,
         Entry::Live,
         Entry::Song,
@@ -61,6 +66,8 @@ impl Entry {
             Entry::Circle => t!(tray_circle),
             Entry::Translate => t!(tray_translate),
             Entry::Snip => t!(nav_snip),
+            Entry::RecordVideo => t!(k_record_video),
+            Entry::RecordAudio => t!(k_record_audio),
             Entry::Studio => t!(tray_studio),
             Entry::Live => t!(lb_live),
             Entry::Song => t!(lb_song),
@@ -95,6 +102,8 @@ impl Entry {
             Entry::Circle => Some(cfg.shortcut.clone()).filter(|s| !s.is_empty()),
             Entry::Translate => quick("translate", false, Some(Target::FullScreen)),
             Entry::Snip => quick("snip", false, None),
+            Entry::RecordVideo => quick("record-video", false, None),
+            Entry::RecordAudio => quick("record-audio", false, None),
             Entry::Live => quick("translate", true, None),
             Entry::Song => quick("song_search", false, None),
             Entry::Update
@@ -111,6 +120,7 @@ impl Entry {
         !matches!(
             self,
             Entry::Update
+                | Entry::RecordAudio
                 | Entry::Studio
                 | Entry::WhatCanIDo
                 | Entry::ClickPins
@@ -134,6 +144,8 @@ impl Entry {
             // the one-shot translate, never the live one bound to the same action
             Entry::Translate => run("translate", Some(Target::FullScreen)),
             Entry::Snip => run("snip", None),
+            Entry::RecordVideo => run("record-video", None),
+            Entry::RecordAudio => run("record-audio", None),
             Entry::Studio => Trigger::OpenStudio(None),
             Entry::WhatCanIDo => Trigger::OpenWhatCard,
             Entry::Live => Trigger::Quick(
@@ -160,14 +172,7 @@ pub fn quick_shortcut(
     live: bool,
     target: Option<Target>,
 ) -> Option<String> {
-    (cfg.quick_actions.iter())
-        .find(|q| {
-            q.action == action
-                && q.live == live
-                && target.is_none_or(|t| q.target == t)
-                && !q.shortcut.is_empty()
-        })
-        .map(|q| q.shortcut.clone())
+    cfg.quick_key(action, live, target)
 }
 
 /// The entries shown with these Labs switches: a Labs feature's only while it is
@@ -1042,21 +1047,50 @@ mod tests {
         // Snip is out of Labs (N-41): always there
         assert_eq!(
             entries(&Labs::default(), false),
-            [Circle, Translate, Snip, Studio, WhatCanIDo, Settings, Quit]
+            [
+                Circle,
+                Translate,
+                Snip,
+                RecordVideo,
+                RecordAudio,
+                Studio,
+                WhatCanIDo,
+                Settings,
+                Quit
+            ]
         );
         let mut on = Labs::default();
         on.set(Feature::Live, true);
         assert_eq!(
             entries(&on, false),
             [
-                Circle, Translate, Snip, Studio, Live, WhatCanIDo, Settings, Quit
+                Circle,
+                Translate,
+                Snip,
+                RecordVideo,
+                RecordAudio,
+                Studio,
+                Live,
+                WhatCanIDo,
+                Settings,
+                Quit
             ]
         );
         on.set(Feature::Song, true);
         assert_eq!(
             entries(&on, false),
             [
-                Circle, Translate, Snip, Studio, Live, Song, WhatCanIDo, Settings, Quit
+                Circle,
+                Translate,
+                Snip,
+                RecordVideo,
+                RecordAudio,
+                Studio,
+                Live,
+                Song,
+                WhatCanIDo,
+                Settings,
+                Quit
             ]
         );
         assert_eq!(
@@ -1076,7 +1110,16 @@ mod tests {
         assert_eq!(
             entries(&Labs::default(), true),
             [
-                Update, Circle, Translate, Snip, Studio, WhatCanIDo, Settings, Quit
+                Update,
+                Circle,
+                Translate,
+                Snip,
+                RecordVideo,
+                RecordAudio,
+                Studio,
+                WhatCanIDo,
+                Settings,
+                Quit
             ]
         );
         assert!(matches!(

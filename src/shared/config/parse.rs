@@ -559,6 +559,11 @@ impl Config {
         if file_version < Some(16) {
             c.studio.steps_on_start = false;
         }
+        // Schema 17: the recording keys (v0.6.0) join a file that has none, by the one place that
+        // adds new actions (`add_quick_actions`; a chord someone else holds is not taken).
+        if file_version < Some(17) {
+            c.add_quick_actions(|a| matches!(a, QuickId::RecordVideo | QuickId::RecordAudio));
+        }
         // Schema 4: translate is on-device unless the user chose AI for it.
         // Before, "ai" was the default and only ever ran with an API provider
         // (the browser one fell back to on-device); kept that way, picking a
@@ -713,7 +718,7 @@ pub(super) fn parse_quick_actions(v: &Value, w: &mut Vec<String>) -> Vec<QuickAc
         let action: String = get_checked(t, &prefix, "action", String::new(), w, |s: &String| {
             let ok = !s.is_empty()
                 && s.chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-');
             ok.then_some(())
                 .ok_or_else(|| "expected an action id like \"ai_explain\"".into())
         });

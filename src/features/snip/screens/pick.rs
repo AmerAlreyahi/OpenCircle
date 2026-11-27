@@ -264,6 +264,8 @@ pub struct Snip {
     pub hinting: bool,
     /// Started by the live pin quick action: a pick becomes a live pin, no editor.
     pub live_pin: bool,
+    /// Started by the record-video key: the picked area is recorded, no editor.
+    pub record: bool,
 }
 
 /// The pill window's size (logical px): countdown.
@@ -302,6 +304,7 @@ impl Snip {
             recent: Vec::new(),
             hinting: true,
             live_pin: false,
+            record: false,
         };
         snip.relocal();
         snip

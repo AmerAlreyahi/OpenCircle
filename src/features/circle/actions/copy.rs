@@ -54,6 +54,12 @@ pub fn text(text: String) -> Result<(), String> {
     with_clipboard(|clipboard| clipboard.set_text(text))
 }
 
+/// Puts `files` on the clipboard as a file list (a recording: Explorer, the file managers and chat
+/// apps paste the file itself); `Err` is `COPY_FAILED`.
+pub fn files(files: &[std::path::PathBuf]) -> Result<(), String> {
+    with_clipboard(|clipboard| clipboard.set().file_list(files))
+}
+
 /// The clipboard's text, if it holds any (Ctrl+V in the Snip editor).
 pub fn read_text() -> Option<String> {
     #[cfg(test)]

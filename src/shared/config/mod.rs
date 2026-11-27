@@ -160,7 +160,7 @@
 //! key stays). 13: Online translation left Labs; an older file's `translate.engine = "online"` stays Online only
 //! when its `[labs] online` was on (it translated locally while off: no text goes to Google unasked); `[labs] online`
 //! is then dropped on save. 14: Hide's strength is Light / Medium / Strong now (0.25 / 0.5 / 1.0 of the text height): the old
-//! default `editor.blur_cell = "thin"` (every user had it written) moves to "medium" once, any other value stays. 15: ONE Picture size and ONE save folder (F11): a file with `snip.save_original = true` (Save wrote the original, Copy the scaled size) gets `snip.max_edge = 0` (Original for both; nothing is ever saved smaller than it was) and `save_original = false` (the key stays, nothing reads it); a `[studio] folder` moves to `general.save_folder` when that is empty and is dropped otherwise (General's folder wins). 16: the Studio's Steps panel is a closed slider: a written `studio.steps_on_start = true` (the old default) moves to false once. A file older than `VERSION` is copied to
+//! default `editor.blur_cell = "thin"` (every user had it written) moves to "medium" once, any other value stays. 15: ONE Picture size and ONE save folder (F11): a file with `snip.save_original = true` (Save wrote the original, Copy the scaled size) gets `snip.max_edge = 0` (Original for both; nothing is ever saved smaller than it was) and `save_original = false` (the key stays, nothing reads it); a `[studio] folder` moves to `general.save_folder` when that is empty and is dropped otherwise (General's folder wins). 16: the Studio's Steps panel is a closed slider: a written `studio.steps_on_start = true` (the old default) moves to false once. 17: the recording keys: `quick_actions` gains `record-video` (Alt+Shift+R) and `record-audio` (Alt+Shift+M) when the file has neither action (a key another action already holds stays that action's: the new one starts unbound). A file older than `VERSION` is copied to
 //! `config.toml.bak-v<old>` (never over an existing copy) and then rewritten as the
 //! current version, by `migrate` (add one step there per schema change).
 
@@ -190,7 +190,7 @@ pub use store::{
 use {look::*, migrate::*, parse::*};
 
 /// Schema version this build reads and writes.
-pub const VERSION: u32 = 16;
+pub const VERSION: u32 = 17;
 const DEFAULT_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+Space";
 
 /// The OS's language as the language table has it, else English
@@ -1426,6 +1426,9 @@ impl Default for Config {
                 qa("snip", "Alt+A", Target::Circle, false),
                 // Opt-in (needs the user's key): no key bound by default.
                 qa("song_search", "", Target::FullScreen, false),
+                // Recording (v0.6.0): video picks an area, window or screen; audio starts at once.
+                qa("record-video", "Alt+Shift+R", Target::Circle, false),
+                qa("record-audio", "Alt+Shift+M", Target::Circle, false),
             ],
             song: SongConfig::default(),
             update: UpdateConfig::default(),
@@ -1495,28 +1498,61 @@ fn may_stand_alone(key: Code) -> bool {
 
 impl Config {
     /// Quick actions that came after the default file was frozen (that file stays byte for
-    /// byte): Settings adds the missing ones, unbound, so their rows show; a file has them
-    /// once Settings saved it.
+    /// byte): the missing ones are added, so their rows show and a file has them once saved.
+    /// The recording keys come with their default key unless another action (or the capture
+    /// shortcut) already holds that chord (compared as chords: "alt+shift+r" is "Alt+Shift+R").
     pub fn add_new_quick_actions(&mut self) {
+        self.add_quick_actions(|_| true);
+    }
+
+    /// The one place that adds quick actions a file lacks: those of the list that `only` allows.
+    pub fn add_quick_actions(&mut self, only: impl Fn(&QuickId) -> bool) {
         // Labs Pins, Windows: a part of a window kept live on top.
         // Snip's screen tools: the colour picker and the ruler (unbound: no free
         // combination is safe on every PC).
-        let unbound = |action, target| QuickAction {
-            action,
-            shortcut: String::new(),
-            target,
-            live: false,
-        };
         let new = [
-            unbound(QuickId::LivePin, Target::Circle),
-            unbound(QuickId::ColourPicker, Target::FullScreen),
-            unbound(QuickId::Ruler, Target::FullScreen),
+            (QuickId::LivePin, "", Target::Circle),
+            (QuickId::ColourPicker, "", Target::FullScreen),
+            (QuickId::Ruler, "", Target::FullScreen),
+            (QuickId::RecordVideo, "Alt+Shift+R", Target::Circle),
+            (QuickId::RecordAudio, "Alt+Shift+M", Target::Circle),
         ];
-        for q in new {
-            if !self.quick_actions.iter().any(|c| c.action == q.action) {
-                self.quick_actions.push(q);
+        for (action, key, target) in new {
+            if !only(&action) || self.quick_actions.iter().any(|c| c.action == action) {
+                continue;
             }
+            let taken = |k: &str| {
+                let chord = parse_shortcut(k).ok().map(|h| h.id());
+                chord.is_some_and(|id| {
+                    parse_shortcut(&self.shortcut).is_ok_and(|h| h.id() == id)
+                        || (self.quick_actions.iter())
+                            .any(|q| parse_shortcut(&q.shortcut).is_ok_and(|h| h.id() == id))
+                })
+            };
+            let shortcut = match key.is_empty() || taken(key) {
+                true => String::new(),
+                false => key.to_string(),
+            };
+            self.quick_actions.push(QuickAction {
+                action,
+                shortcut,
+                target,
+                live: false,
+            });
         }
+    }
+
+    /// The user's key for a quick action, when one is bound (the tray's hints, the recording's
+    /// Stop row): `live` and `target` narrow it when given.
+    pub fn quick_key(&self, action: &str, live: bool, target: Option<Target>) -> Option<String> {
+        (self.quick_actions.iter())
+            .find(|q| {
+                q.action == action
+                    && q.live == live
+                    && target.is_none_or(|t| q.target == t)
+                    && !q.shortcut.is_empty()
+            })
+            .map(|q| q.shortcut.clone())
     }
 
     /// `<user config dir>/opencircle/config.toml`; `None` if the OS has no config dir,

@@ -2330,6 +2330,23 @@ fn click_view(s: &Studio, at: (f32, f32)) -> Vec<Msg> {
     crate::shared::kit::testing::shot::click(view(s, &[], false), SIZE, Point::new(at.0, at.1))
 }
 
+/// R04-65: with unsaved recordings in Recent the empty Studio's start screen has one
+/// "Show recordings" row; pressing it asks for the folder; without them there is no row.
+#[test]
+fn r04_65_the_start_screen_shows_recordings_only_when_there_are_some() {
+    use crate::shared::kit::testing::shot;
+    let mut s = Studio::new(docked());
+    let words = |s: &Studio| shot::texts(view(s, &[], false));
+    assert!(!words(&s).iter().any(|t| t == crate::t!(st_show_recordings)));
+    s.set_recordings(true);
+    let there = words(&s);
+    assert!(
+        there.iter().any(|t| t == crate::t!(st_show_recordings)),
+        "{there:?}"
+    );
+    assert!(matches!(s.update(Msg::ShowRecordings), Outcome::ShowFolder));
+}
+
 /// v3.1 item 6: a press anywhere outside an open menu closes it (before, it
 /// stayed until its opener was pressed again); the press goes no further.
 #[test]

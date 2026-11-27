@@ -406,6 +406,8 @@ pub(super) fn action_name(id: &str, live: bool) -> String {
         ("ruler", _) => t!(k_ruler).into(),
         ("song_search", _) => t!(lb_song).into(),
         ("live_pin", _) => t!(k_live_pin).into(),
+        ("record-video", _) => t!(k_record_video).into(),
+        ("record-audio", _) => t!(k_record_audio).into(),
         (other, _) => {
             let spaced = other.replace('_', " ");
             let mut chars = spaced.chars();
