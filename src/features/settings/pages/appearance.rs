@@ -15,6 +15,7 @@ use crate::shared::kit::card::{grid, look_card, theme_card};
 use crate::shared::kit::chip::{Tone, status};
 use crate::shared::kit::looks::{LOOKS, Look};
 use crate::shared::kit::motion;
+use crate::shared::kit::section::section;
 use crate::shared::kit::setting_row::{self, title};
 use crate::shared::kit::themes::THEMES;
 use crate::shared::theme;
@@ -35,23 +36,44 @@ pub fn view(state: &State) -> Element<'_, Message> {
         true => (t!(c_on), Tone::Ok),
         false => (t!(a_reduce_off), Tone::Busy),
     };
-    let mut rows = column![
-        setting_row::row(
+    let theme = section(Some(t!(sec_theme)), None, || {
+        vec![
+            themes_group(state, true, t!(ap_when_light)),
+            themes_group(state, false, t!(ap_when_dark)),
+        ]
+    });
+    let border = section(Some(t!(sec_border)), None, || {
+        let mut rows = vec![setting_row::block(
+            title(t!(a_looks)),
+            t!(a_looks_desc),
+            grid(LOOK_COLUMNS, look_cards(state)),
+        )];
+        if d.look.theme == LookTheme::Custom {
+            rows.extend(custom::rows(state));
+        }
+        rows
+    });
+    let motion = section(Some(t!(sec_motion)), None, || {
+        vec![setting_row::row(
             title(t!(a_reduce)),
             tr(MOTION_DESC),
-            status(reduced.0, reduced.1)
-        ),
-        themes_row(state),
-    ];
-    rows = rows.push(setting_row::block(
-        title(t!(a_looks)),
-        t!(a_looks_desc),
-        grid(LOOK_COLUMNS, look_cards(state)),
-    ));
-    if d.look.theme == LookTheme::Custom {
-        rows = rows.extend(custom::rows(state));
-    }
-    rows.into()
+            status(reduced.0, reduced.1),
+        )]
+    });
+    column![theme, border, motion]
+        .spacing(crate::shared::kit::tokens::settings::SECTION_GAP)
+        .into()
+}
+
+/// The theme cards of one mode (light, or dark) under its heading.
+fn themes_group<'a>(state: &'a State, light: bool, name: &'a str) -> Element<'a, Message> {
+    let d = &state.draft;
+    let shown = theme::kit_theme(d.theme, theme::os_dark(), &d.appearance).id;
+    let cards = (THEMES.into_iter().filter(|t| t.light == light)).map(|t| {
+        let words = theme_words(t.id).map_or((t.name, t.desc), |(n, d)| (tr(n), tr(d)));
+        theme_card(t, words, t.id == shown, Message::ThemeCard(t.id))
+    });
+    setting_row::block(title(name), "", grid(COLUMNS, cards))
 }
 
 /// The 12 theme cards (Settings, and onboarding's Look step).

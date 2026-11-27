@@ -6,7 +6,7 @@
 //! design's rise (the whole page moving 14 px over 190 ms) redrew the whole
 //! window every frame on the CPU renderer (laggy on a 4K screen); it returns
 //! with the GPU renderer.
-use iced::widget::{Space, column, container, mouse_area};
+use iced::widget::{Space, column, container, mouse_area, row};
 use iced::{Center, Element, Fill, Padding};
 
 use super::state::{Message, State};
@@ -183,7 +183,15 @@ const REPORT_W: f32 = 420.0;
 /// needs them), then report; nothing is sent.
 fn report_dialog<'a>() -> Element<'a, Message> {
     modal::pad(vec![
-        modal::header(t!(ab_trouble), None, Message::Dismiss),
+        // the flag, then the title and the x (never mirrored, like the header)
+        row![
+            crate::shared::kit::icon::glyph('\u{e0d6}', 18.0)
+                .color(crate::shared::kit::themes::c().accent),
+            modal::header(t!(ab_trouble), None, Message::Dismiss),
+        ]
+        .spacing(space::GAP)
+        .align_y(Center)
+        .into(),
         sub(Role::ROW_DESC, t!(ab_trouble_desc)).into(),
         // the buttons sit in the middle of the popup (owner, 2026-11-25)
         crate::dir_row![
@@ -285,14 +293,31 @@ fn nav(state: &State) -> Element<'_, Message> {
     )
 }
 
+/// The window width from which a page's clip stands in a column beside the settings (A5+).
+const WIDE: f32 = 1560.0;
+const CLIP_COLUMN: f32 = 380.0;
+
 fn page(state: &State) -> Element<'_, Message> {
+    let wide = state.win_w >= WIDE;
     let page = pages::of(state.section);
-    let head = page_head(page.glyph, tr(page.title), tr(page.line), None);
+    // A3+: "See how it works" opens the clip under the head (a wide window shows it in a column)
+    let see = previews::opener(state)
+        .filter(|_| !wide)
+        .map(|(key, open)| {
+            let go = Some(Message::Preview(key, !open));
+            button(label(t!(c_see_how)), Kind::Quiet, go)
+        });
+    let head = page_head(page.glyph, tr(page.title), tr(page.line), see);
+    let editing =
+        state.section == super::state::Section::Translate && state.glossaries.is_editing();
+    // (the glossary editor is a sub-page: no preview over it)
+    let clip = previews::view(state, wide).filter(|_| !editing);
+    let (above, beside) = match wide {
+        true => (None, clip),
+        false => (clip, None),
+    };
     let body = column![head]
-        // (the glossary editor is a sub-page: no preview over it)
-        .push(previews::view(state).filter(|_| {
-            !(state.section == super::state::Section::Translate && state.glossaries.is_editing())
-        }))
+        .push(above)
         .push(crate::shared::kit::setting_row::highlighting(
             state.marked.as_deref(),
             || match page.sectioned {
@@ -307,16 +332,24 @@ fn page(state: &State) -> Element<'_, Message> {
         .max_width(CONTENT_MAX)
         .width(Fill);
     let body = container(body).center_x(Fill).width(Fill);
-    floating_card(
+    let mut inside = row![
         scroll(body)
             .id(super::search::PAGE)
             .width(Fill)
-            .height(Fill),
-    )
-    .width(Fill)
-    .height(Fill)
-    .clip(true)
-    .into()
+            .height(Fill)
+    ];
+    if let Some(clip) = beside {
+        inside = inside.push(
+            container(clip)
+                .width(CLIP_COLUMN)
+                .padding(Padding::from([CONTENT_PAD[0], 20.0])),
+        );
+    }
+    floating_card(inside)
+        .width(Fill)
+        .height(Fill)
+        .clip(true)
+        .into()
 }
 
 /// Closing with changes that can't be saved yet: Save / Discard / Keep editing.

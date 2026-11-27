@@ -17,8 +17,10 @@ use super::super::state::{
 use crate::features::ask_ai::screens::model_list;
 use crate::shared::config::{Provider, StaysOpen};
 use crate::shared::kit::button::{Kind, button, label};
+use crate::shared::kit::choice_card::{Choice as Card, Mark, choice_cards};
 use crate::shared::kit::dropdown::dropdown;
 use crate::shared::kit::field::input;
+use crate::shared::kit::section::section;
 use crate::shared::kit::segmented::{boolean, segmented};
 use crate::shared::kit::setting_row::{self, title};
 use crate::shared::kit::text::{error, sub};
@@ -27,11 +29,16 @@ use crate::shared::kit::tooltip::tip;
 use crate::shared::secrets::Secret;
 
 pub fn view(state: &State) -> Element<'_, Message> {
-    column![provider_rows(state), chat_rows(state)].into()
+    column![
+        section(Some(t!(sec_answers)), None, || answer_rows(state)),
+        section(Some(t!(sec_chat)), None, || chat_rows(state)),
+    ]
+    .spacing(crate::shared::kit::tokens::settings::SECTION_GAP)
+    .into()
 }
 
 /// The AI chat's rows, for every provider (the chat's drawer has the first too).
-fn chat_rows(state: &State) -> Element<'_, Message> {
+fn chat_rows(state: &State) -> Vec<Element<'_, Message>> {
     let chat = &state.draft.chat;
     let (from, t) = state.thumb(chat.stays_open, |p| match p {
         Pick::ChatStays(v) => Some(v),
@@ -78,23 +85,76 @@ fn chat_rows(state: &State) -> Element<'_, Message> {
         ),
     );
     match keyed(state) {
-        true => column![stays, zoom, web, keep].into(),
-        false => column![stays, keep].into(),
+        true => vec![stays, zoom, web, keep],
+        false => vec![stays, keep],
     }
 }
 
-/// Who answers, and for an AI provider its server, model and key.
-fn provider_rows(state: &State) -> Element<'_, Message> {
+/// Which of the three setup paths the config is on (`None`: an unreadable value, none chosen).
+fn path(ai: &crate::shared::config::AiConfig) -> Option<usize> {
+    match (&ai.provider, Preset::of(ai)) {
+        (Provider::Browser, _) => Some(0),
+        (Provider::Invalid(_) | Provider::Unreadable, _) => None,
+        (_, Some(p)) if p.signs_in() => Some(1),
+        _ => Some(2),
+    }
+}
+
+/// The presets "Your own provider" offers: every one but OpenRouter (its own card).
+static OWN: std::sync::LazyLock<Vec<Preset>> =
+    std::sync::LazyLock::new(|| PRESETS.iter().filter(|p| !p.signs_in()).copied().collect());
+
+/// Who answers: the three setup cards (Browser / OpenRouter account / Your own provider and key), then
+/// the chosen path's rows.
+fn answer_rows(state: &State) -> Vec<Element<'_, Message>> {
     let ai = &state.draft.ai;
-    let mut rows = column![provider_row(state)];
-    let Some(preset) = Preset::of(ai).filter(|_| keyed(state)) else {
-        return rows.into(); // no model, server or key: the browser, or nothing chosen yet
+    let now = path(ai);
+    let cards = [
+        Card {
+            mark: Mark::Glyph('\u{e154}'),
+            title: t!(ai_browser),
+            desc: t!(ai_c_browser_d),
+        },
+        Card {
+            mark: Mark::Logo,
+            title: t!(ai_c_or),
+            desc: t!(ai_c_or_d),
+        },
+        Card {
+            mark: Mark::Glyph('\u{e119}'),
+            title: t!(ai_c_own),
+            desc: t!(ai_c_own_d),
+        },
+    ];
+    let current = Message::Provider(ai.provider.clone());
+    let mut picker = column![choice_cards(&cards, now.unwrap_or(usize::MAX), move |i| {
+        match (i, now) {
+            (0, _) => Message::Provider(Provider::Browser),
+            _ if now == Some(i) => current.clone(),
+            (1, _) => Message::Preset(PRESETS[0]),
+            _ => Message::Preset(OWN[0]),
+        }
+    })]
+    .spacing(space::GAP);
+    if let Some(e) = issue(&state.problems, "ai.provider") {
+        picker = picker.push(error(Role::ROW_DESC, e));
+    }
+    let desc = match ai.provider {
+        Provider::Browser => t!(ai_from_browser),
+        _ => t!(ai_from_desc),
     };
-    rows = rows.push(preset_row(state)).push(url_row(state));
+    let mut rows = vec![setting_row::block(title(t!(ai_from)), desc, picker)];
+    let Some(preset) = Preset::of(ai).filter(|_| keyed(state)) else {
+        return rows; // no model, server or key: the browser, or nothing chosen yet
+    };
     let saved = state.key.status == KeyStatus::Saved;
-    // with a key saved too: "Reconnect" replaces it
-    if preset.signs_in() {
-        rows = rows.push(sign_in_row(state, saved));
+    match now {
+        // with a key saved too: "Reconnect" replaces it
+        Some(1) => rows.push(sign_in_row(state, saved)),
+        _ => {
+            rows.push(own_preset_row(state));
+            rows.extend(url_row(state));
+        }
     }
     // a free tier's key page (A 1.7), while no key is saved
     let free = preset.free_key_page().filter(|_| !saved).map(|url| {
@@ -108,9 +168,23 @@ fn provider_rows(state: &State) -> Element<'_, Message> {
         ]
         .into()
     });
-    rows.push(model_row(state, preset))
-        .push(key_row_with(state, free))
-        .into()
+    rows.push(model_row(state, preset));
+    rows.push(key_row_with(state, free));
+    rows
+}
+
+/// "Your own provider": the provider by name, without OpenRouter (its own card).
+fn own_preset_row(state: &State) -> Element<'_, Message> {
+    let preset = Preset::of(&state.draft.ai);
+    setting_row::row(
+        title(t!(ai_prov)),
+        t!(ai_prov_desc),
+        tip(
+            dropdown(&OWN, preset, t!(ai_prov_choose), Message::Preset),
+            t!(ai_provider),
+            Position::Top,
+        ),
+    )
 }
 
 /// Connect OpenRouter (one click, PKCE in the browser): the button, or while

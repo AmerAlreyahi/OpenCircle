@@ -193,10 +193,30 @@ pub fn clips(
 /// The calm line under a stage whose download failed.
 pub const FAILED: S = S::c_preview_failed;
 
-/// The page's previews, `None` when it has none.
-pub fn view(state: &State) -> Option<Element<'_, Message>> {
+/// Settings round 2 (A3+): the page's "See how it works" link: the first preview with a clip, its
+/// name and whether it is open now. `None`: the page has no clip (no link).
+pub fn opener(state: &State) -> Option<(&'static str, bool)> {
+    on(state, state.section)
+        .find(|h| {
+            state.players.iter().any(|(k, _)| *k == h.key) || !chosen(h, &state.draft).is_empty()
+        })
+        .map(|h| (h.key, !hidden(state, h)))
+}
+
+/// The page's previews, `None` when it has none. `column` (A5+, a wide window): the clip stands in
+/// its own column and keeps its "Play preview" row; otherwise a folded preview is only the head's
+/// "See how it works" link (A3+), the stage drops in under the head once opened.
+pub fn view(state: &State, beside: bool) -> Option<Element<'_, Message>> {
     let reduced = crate::shared::kit::motion::reduced();
     let heroes: Vec<_> = on(state, state.section)
+        .filter(|h| {
+            beside
+                || !hidden(state, h)
+                || state.fetching.contains(&h.key)
+                || state.failed.contains(&h.key)
+                || (chosen(h, &state.draft).is_empty()
+                    && !state.players.iter().any(|(k, _)| *k == h.key))
+        })
         .map(|h| {
             let shown = !hidden(state, h);
             let player = (state.players.iter()).find(|(k, _)| *k == h.key);

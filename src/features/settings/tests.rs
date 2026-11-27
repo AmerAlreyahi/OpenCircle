@@ -928,7 +928,10 @@ fn old_configs_show_as_the_same_provider_and_save_unchanged() {
         );
         update(&mut s, Message::Section(Section::Ai));
         let texts = shot::texts(view(&s));
-        assert!(texts.iter().any(|t| t == "AI provider"), "{texts:?}");
+        assert!(
+            texts.iter().any(|t| t == "Your own provider and key"),
+            "{texts:?}"
+        );
         // a change elsewhere saves; [ai] is written as it was
         update(&mut s, Message::DefaultAction(DefaultAction::Copy));
         assert!(
@@ -2600,7 +2603,7 @@ fn play_preview_downloads_only_on_the_click() {
     // a player with its still; the clips aren't here (empty data folder)
     assert!(s.players.iter().all(|(_, p)| !p.on_disk()));
     let texts = shot::texts(view(&s));
-    assert!(texts.iter().any(|t| t == "Play preview"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "See how it works"), "{texts:?}");
     assert!(
         !texts.iter().any(|t| t == "Preview"),
         "folded: no stage: {texts:?}"
@@ -2641,7 +2644,7 @@ fn c7_switches_and_one_play_preview_row() {
     assert!(!texts.iter().any(|t| t == "Off" || t == "On"), "{texts:?}");
     update(&mut s, Message::Section(Section::Ai));
     let texts = shot::texts(view(&s));
-    assert!(texts.iter().any(|t| t == "Play preview"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "See how it works"), "{texts:?}");
     for gone in ["Preview", "Hide preview", "Show preview"] {
         assert!(!texts.iter().any(|t| t == gone), "{gone}: {texts:?}");
     }
@@ -2649,7 +2652,7 @@ fn c7_switches_and_one_play_preview_row() {
     with_clip(&mut s);
     s.opened.clear();
     let texts = shot::texts(view(&s));
-    assert!(texts.iter().any(|t| t == "Play preview"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "See how it works"), "{texts:?}");
     assert!(!texts.iter().any(|t| t == "Preview"), "no stage: {texts:?}");
     s.opened.push("ai"); // (the click; its clips are here)
     let texts = shot::texts(view(&s));
@@ -2724,7 +2727,7 @@ fn hiding_a_preview_is_session_only_and_folds_it_into_the_play_row() {
     let saved = Config::load_from(&path).0.appearance.hidden_previews;
     assert!(saved.is_empty(), "nothing written: {saved:?}");
     let texts = shot::texts(view(&s));
-    assert!(texts.iter().any(|t| t == "Play preview"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "See how it works"), "{texts:?}");
     assert!(!texts.iter().any(|t| t == "Preview" || t == "Hide preview"));
     moving_update(&mut s, Message::Preview("ai", true));
     s.fetching.clear(); // (its clips were not on this PC: the click started a download)
@@ -2769,7 +2772,8 @@ fn labs_previews_show_only_while_their_switch_is_on() {
             h.key
         );
     }
-    // a preview shows its feature's real shortcut
+    // a preview shows its feature's real shortcut (opened: a folded one is only the head's link)
+    s.opened.push("look");
     let texts = page(&mut s, Section::Look);
     let at = texts.iter().position(|t| t == "Circle to Search").unwrap();
     let keys = key_labels(&s.draft.shortcut);
@@ -2808,11 +2812,15 @@ fn previews_stills_match_their_golden_images() {
             let file = format!("preview-{name}-{}", theme.id);
             let size = Size::new(640.0, height);
             fn page(s: &State) -> Element<'_, Message> {
-                surface(Material::Window, 0.0, super::previews::view(s).unwrap())
-                    .padding(16)
-                    .width(iced::Fill)
-                    .height(iced::Fill)
-                    .into()
+                surface(
+                    Material::Window,
+                    0.0,
+                    super::previews::view(s, true).unwrap(),
+                )
+                .padding(16)
+                .width(iced::Fill)
+                .height(iced::Fill)
+                .into()
             }
             // laid out once (the stage's width), then each still decoded at it
             let _ = shot::render(page(&s), 640, height as u32);
@@ -2862,11 +2870,15 @@ fn the_preview_stage_stays_small_in_a_maximized_window() {
     with_clip(&mut s); // (the clips are on this PC: the stage shows)
     s.win_h = 1440.0;
     fn page(s: &State) -> Element<'_, Message> {
-        surface(Material::Window, 0.0, super::previews::view(s).unwrap())
-            .padding(16)
-            .width(iced::Fill)
-            .height(iced::Fill)
-            .into()
+        surface(
+            Material::Window,
+            0.0,
+            super::previews::view(s, true).unwrap(),
+        )
+        .padding(16)
+        .width(iced::Fill)
+        .height(iced::Fill)
+        .into()
     }
     let _ = shot::render(page(&s), 1800, 640);
     update(&mut s, Message::Preview("ai", true));
@@ -4987,4 +4999,41 @@ fn w117_settings_colour_picker_puts_handle_under_pointer() {
     }
     let h = s.hsv.expect("settings hsv hue");
     assert!((h.h - 0.80 * 360.0).abs() < 2.0, "settings hue: {h:?}");
+}
+
+/// Settings round 2, AI setup paths: three cards (Browser / OpenRouter account / Your own provider and key);
+/// OpenRouter shows its sign-in, another provider the provider dropdown; the browser no model or key.
+#[test]
+fn ai_has_three_setup_path_cards() {
+    let (mut s, _) = state(None);
+    let texts = page(&mut s, Section::Ai);
+    for card in ["Browser", "OpenRouter account", "Your own provider and key"] {
+        assert!(texts.iter().any(|t| t == card), "{card}: {texts:?}");
+    }
+    assert!(!texts.iter().any(|t| t == "API key"), "browser: no key row");
+    update(&mut s, Message::Preset(PRESETS[0]));
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Sign in"), "{texts:?}");
+    assert!(!texts.iter().any(|t| t == "Provider"), "{texts:?}");
+    update(&mut s, Message::Preset(PRESETS[1]));
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Provider"), "{texts:?}");
+    assert!(!texts.iter().any(|t| t == "Sign in"), "{texts:?}");
+}
+
+/// Settings round 2, A3+ / A5+: a folded preview is the head's "See how it works" link; a wide window
+/// stands the clip in a column with its Play preview row instead.
+#[test]
+fn the_preview_is_a_head_link_or_a_wide_column() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Ai));
+    with_clip(&mut s);
+    s.opened.clear();
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "See how it works"), "{texts:?}");
+    assert!(!texts.iter().any(|t| t == "Play preview"), "{texts:?}");
+    s.win_w = 1700.0;
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Play preview"), "{texts:?}");
+    assert!(!texts.iter().any(|t| t == "See how it works"), "{texts:?}");
 }

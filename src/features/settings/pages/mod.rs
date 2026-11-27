@@ -98,7 +98,6 @@ pub const PAGES: [Page; 15] = [
         )
     },
     Page {
-        sectioned: false,
         ..page(
             Section::Appearance,
             S::nav_appearance,
@@ -117,7 +116,6 @@ pub const PAGES: [Page; 15] = [
         look::view,
     ),
     Page {
-        sectioned: false,
         ..page(
             Section::Ai,
             S::nav_ai_search,
@@ -139,7 +137,6 @@ pub const PAGES: [Page; 15] = [
         )
     },
     Page {
-        sectioned: false,
         ..page(
             Section::Translate,
             S::nav_translate,
@@ -215,7 +212,6 @@ pub const PAGES: [Page; 15] = [
         )
     },
     Page {
-        sectioned: false,
         ..page(
             Section::About,
             S::nav_about,

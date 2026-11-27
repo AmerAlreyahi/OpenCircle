@@ -1444,9 +1444,10 @@ impl Windows {
         // the preview stage decodes at the px it is shown at
         let scale = window::scale_factor(id).map(|s| Msg::Settings(settings::Message::Scale(s)));
         let height = window::size(id).map(|s| Msg::Settings(settings::Message::Height(s.height)));
+        let width = window::size(id).map(|s| Msg::Settings(settings::Message::Width(s.width)));
         let open = open.discard().chain(window::gain_focus(id));
         match kind {
-            Kind::Settings => open.chain(scale).chain(height),
+            Kind::Settings => open.chain(scale).chain(height).chain(width),
             _ => open,
         }
     }
@@ -1828,6 +1829,7 @@ impl Windows {
                 if self.id(Kind::Settings) == Some(id) {
                     let h = size.height;
                     let _ = self.handle(Msg::Settings(settings::Message::Height(h)));
+                    let _ = self.handle(Msg::Settings(settings::Message::Width(size.width)));
                 }
                 if self.studio_window() == Some(id) {
                     let _ =

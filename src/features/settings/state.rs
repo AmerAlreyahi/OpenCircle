@@ -659,6 +659,7 @@ pub struct State {
     pub(super) scale: f32,
     /// The window's height in logical px (the stage's smart size).
     pub(super) win_h: f32,
+    pub(super) win_w: f32,
     /// Previews whose clips are downloading, and those whose download failed
     /// (by `hidden_previews` name).
     pub(super) fetching: Vec<&'static str>,
@@ -884,6 +885,8 @@ pub enum Message {
     Scale(f32),
     /// The window's height in logical px.
     Height(f32),
+    /// ... and its width (a wide window shows a page's clip in a column).
+    Width(f32),
     /// The footer's question when the window is closed with unsaved changes (#136).
     CloseSave,
     CloseDiscard,
@@ -1213,6 +1216,7 @@ impl State {
             stage: Default::default(),
             scale: 1.0,
             win_h: 720.0,
+            win_w: 1280.0,
             fetching: Vec::new(),
             opened: Vec::new(),
             failed: Vec::new(),
@@ -1696,6 +1700,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             | Message::Hsv(_)
             | Message::Scale(_)
             | Message::Height(_)
+            | Message::Width(_)
             | Message::Step(..)
             | Message::Caption(_)
             | Message::SearchOpen
@@ -2141,6 +2146,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         }
         Message::Scale(scale) => state.scale = scale,
         Message::Height(h) => state.win_h = h,
+        Message::Width(w) => state.win_w = w,
         Message::Tick => {
             if let Some(t) = state.played {
                 let at = t.elapsed();

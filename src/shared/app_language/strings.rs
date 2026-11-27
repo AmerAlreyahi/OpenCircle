@@ -2793,6 +2793,44 @@ strings! {
         | "دوّن عليها في الشريط الصغير أسفل المنطقة.";
     ss_studio_d: "Opens the picture in the full editor window."
         | "يفتح الصورة في نافذة المحرر الكاملة.";
+    c_see_how: "See how it works"
+        | "شاهد كيف يعمل";
+    sec_answers: "Answers"
+        | "الإجابات";
+    sec_chat: "Chat"
+        | "المحادثة";
+    ai_c_browser_d: "Opens Google AI Mode in your browser. No key, no setup."
+        | "يفتح Google AI Mode في متصفحك. دون مفتاح ودون إعداد.";
+    ai_c_or: "OpenRouter account"
+        | "حساب OpenRouter";
+    ai_c_or_d: "Sign in once in your browser. A chat you can pin above your apps."
+        | "سجّل الدخول مرة واحدة في متصفحك. محادثة يمكنك تثبيتها فوق تطبيقاتك.";
+    ai_c_own: "Your own provider and key"
+        | "مزوّدك ومفتاحك";
+    ai_c_own_d: "OpenAI, Anthropic, Gemini, a local model or any server you name."
+        | "OpenAI أو Anthropic أو Gemini أو نموذج محلي أو أي خادم تحدده.";
+    sec_languages: "Languages"
+        | "اللغات";
+    sec_models: "Offline models"
+        | "النماذج دون اتصال";
+    sec_games: "Games"
+        | "الألعاب";
+    tr_c_local_d: "The fastest. No key, and nothing leaves your PC."
+        | "الأسرع. دون مفتاح ولا يغادر شيء حاسوبك.";
+    tr_c_ai_d: "Your AI provider. Reads more naturally, can be slower."
+        | "مزوّد الذكاء الاصطناعي لديك. أسلوبه أطبع وقد يكون أبطأ.";
+    tr_c_online_d: "Free web translator. Needs internet; only the text is sent."
+        | "مترجم ويب مجاني. يحتاج إنترنت ويُرسل النص فقط.";
+    sec_theme: "Theme"
+        | "السمة";
+    sec_border: "Screen border"
+        | "حافة الشاشة";
+    sec_motion: "Motion"
+        | "الحركة";
+    ap_when_light: "When it is light"
+        | "عندما يكون الوضع فاتحًا";
+    ap_when_dark: "When it is dark"
+        | "عندما يكون الوضع داكنًا";
     st_opening: "Opening"
         | "الفتح";
     ss_open_in_snip: "Chosen in Snip, under After a capture"

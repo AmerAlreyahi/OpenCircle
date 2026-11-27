@@ -8,17 +8,18 @@ use iced::widget::tooltip::Position;
 use iced::widget::{Space, column, container};
 use iced::{Element, Fill};
 
-use super::super::state::{Message, Named, Pick, SOURCES, State, TARGETS, issue};
+use super::super::state::{Message, Named, SOURCES, State, TARGETS, issue};
 
 use crate::features::settings::labs::Feature;
 use crate::features::text_reading::screens::model_download::mb;
 use crate::features::translate::mt;
 use crate::shared::config::Engine;
 use crate::shared::kit::button::{Kind, button, label, regular};
+use crate::shared::kit::choice_card::{Choice as Card, Mark, choice_cards};
 use crate::shared::kit::dropdown::dropdown;
 use crate::shared::kit::field::input;
 use crate::shared::kit::progress;
-use crate::shared::kit::segmented::segmented;
+use crate::shared::kit::section::section;
 use crate::shared::kit::setting_row::{self, title};
 use crate::shared::kit::text::{error, paragraph, sub};
 use crate::shared::kit::tokens::{Role, space};
@@ -189,29 +190,59 @@ pub fn view(state: &State) -> Element<'_, Message> {
     if state.glossaries.is_editing() {
         return super::glossaries::editor(state);
     }
+    let mut page = column![section(Some(t!(sec_languages)), None, || {
+        language_rows(state)
+    })];
+    let models = models_row(&state.models);
+    page = page.push(section(Some(t!(sec_models)), None, || {
+        let mut rows: Vec<Element<'_, Message>> = models.into_iter().collect();
+        rows.push(optima(&state.models));
+        rows
+    }));
+    page.push(section(Some(t!(sec_games)), None, || {
+        vec![super::glossaries::row(state)]
+    }))
+    .spacing(crate::shared::kit::tokens::settings::SECTION_GAP)
+    .into()
+}
+
+/// Engine (three cards, the design's order), source and target language, the Live refresh row.
+fn language_rows(state: &State) -> Vec<Element<'_, Message>> {
     let t = &state.draft.translate;
-    let chosen = t.engine;
-    let (from, glide) = state.thumb(chosen, |p| match p {
-        Pick::Engine(e) => Some(e),
-        _ => None,
-    });
     let engines = [
-        (Engine::Ai, t!(tr_ai)),
-        (Engine::Offline, t!(tr_local)),
-        (Engine::Online, t!(tr_online)),
+        (
+            Engine::Offline,
+            Mark::Glyph('\u{e15b}'),
+            t!(tr_local),
+            t!(tr_c_local_d),
+        ),
+        (Engine::Ai, Mark::Logo, t!(tr_ai), t!(tr_c_ai_d)),
+        (
+            Engine::Online,
+            Mark::Glyph('\u{e154}'),
+            t!(tr_online),
+            t!(tr_c_online_d),
+        ),
     ];
-    let engine = segmented(&engines, chosen, from, glide, Message::Engine);
-    let mut rows = column![setting_row::row(
+    let cards: Vec<_> = (engines.iter())
+        .map(|&(_, mark, title_, desc)| Card {
+            mark,
+            title: title_,
+            desc,
+        })
+        .collect();
+    let at = engines.iter().position(|e| e.0 == t.engine).unwrap_or(0);
+    let mut rows = vec![setting_row::block(
         title(t!(tr_engine)),
-        match chosen {
+        match t.engine {
             Engine::Ai => t!(tr_engine_ai),
             Engine::Offline => t!(tr_engine_local),
             Engine::Online => t!(tr_engine_online),
         },
-        engine,
+        choice_cards(&cards, at, move |i| Message::Engine(engines[i].0)),
     )];
     let source = SOURCES.iter().find(|l| l.0.code == t.source).copied();
-    rows = rows.push(language_row(
+    rows.push(language_row(
         state,
         (t!(tr_source), t!(tr_source_desc)),
         dropdown(&SOURCES, source, &t.source, |l: Named| Message::Source(l.0)),
@@ -219,19 +250,16 @@ pub fn view(state: &State) -> Element<'_, Message> {
     ));
     // Offline can't do every pair: say so (AI is the other way).
     let target_desc = match t.engine == Engine::Offline && !mt::available(&t.source, &t.target) {
-        true => {
-            t!(tr_no_model)
-        }
+        true => t!(tr_no_model),
         false => t!(tr_target_desc),
     };
     let target = TARGETS.iter().find(|l| l.0.code == t.target).copied();
-    rows = rows.push(language_row(
+    rows.push(language_row(
         state,
         (t!(tr_target), target_desc),
         dropdown(&TARGETS, target, &t.target, |l: Named| Message::Target(l.0)),
         "translate.target",
     ));
-    rows = rows.push(super::glossaries::row(state));
     // Live translate is a Labs feature (until Live translation): its row only while on.
     // Hidden (hide, don't delete): live translate reads every frame since 0.3.0,
     // so the refresh beat (`translate.live_interval_ms`, still read) does nothing.
@@ -243,16 +271,13 @@ pub fn view(state: &State) -> Element<'_, Message> {
         if let Some(e) = problem {
             control = control.push(error(Role::ROW_DESC, e));
         }
-        rows = rows.push(setting_row::row(
+        rows.push(setting_row::row(
             title(t!(tr_live)),
             t!(tr_live_desc),
             control,
         ));
     }
-    if let Some(row) = models_row(&state.models) {
-        rows = rows.push(row);
-    }
-    rows.push(optima(&state.models)).into()
+    rows
 }
 
 fn language_row<'a>(
