@@ -1880,3 +1880,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   Q4 an unsaved recording goes to Recent captures when S2 slides away (if Recent is on), else deleted; crash leftovers offered once.
   Q5 Linux without an H.264 encoder records WebM only (Format row hidden); Windows MP4 only. R-03 audio may start; R-04/R-05 wait for
   lab tests L1/L3/L4/L6 + Q1/Q2; R-06 waits for Q3 + L15.
+- Rely more on Antigravity (owner, 2026-11-27, "pls rely more on antigravity, tell me when the weekly limits are reached so I can login
+  with a different account"): new coding / testing / lab jobs go to Neon first, up to the cap of 2 Neon + 2 Claude; Claude for reviews,
+  design rounds and careful fix passes. When Antigravity's quota is reached the lead TELLS THE OWNER at once (notification if he is
+  away) so he switches accounts; a Claude builder takes the job over only if he doesn't answer.
