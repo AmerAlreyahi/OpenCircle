@@ -41,6 +41,8 @@ pub struct Foot<'a, Message> {
 pub const CARD_PAD_V: f32 = 10.0;
 pub const SEPARATOR: f32 = 13.0;
 pub const ROW_GAP: f32 = 2.0;
+/// The card's horizontal padding.
+pub const CARD_PAD_H: f32 = 8.0;
 pub const ITEM: f32 = size::NAV_ITEM;
 
 const BAR_W: f32 = 3.0;
@@ -136,15 +138,14 @@ fn item<'a, Message: Clone + 'a>(
     }
 }
 
-/// The card, as tall as its room: `entries` (the scrolling list), the open one `active`, `foot` under a hairline.
-pub fn nav_card<'a, Message: Clone + 'a>(
+/// The entries alone (grouped by hairlines, the open one marked): what `nav_card` lists, for a
+/// dialog's own page list.
+pub fn entry_list<'a, Message: Clone + 'a>(
     entries: &[Entry<'a>],
     active: usize,
     collapsed: bool,
     on: impl Fn(usize) -> Message,
-    report: Foot<'a, Message>,
-    collapse: Foot<'a, Message>,
-) -> Element<'a, Message> {
+) -> iced::widget::Column<'a, Message> {
     let mut list = column![].spacing(ROW_GAP);
     for (i, e) in entries.iter().enumerate() {
         if i > 0 && entries[i - 1].group != e.group {
@@ -160,6 +161,19 @@ pub fn nav_card<'a, Message: Clone + 'a>(
             on(i),
         ));
     }
+    list
+}
+
+/// The card, as tall as its room: `entries` (the scrolling list), the open one `active`, `foot` under a hairline.
+pub fn nav_card<'a, Message: Clone + 'a>(
+    entries: &[Entry<'a>],
+    active: usize,
+    collapsed: bool,
+    on: impl Fn(usize) -> Message,
+    report: Foot<'a, Message>,
+    collapse: Foot<'a, Message>,
+) -> Element<'a, Message> {
+    let list = entry_list(entries, active, collapsed, on);
     let foot =
         |f: Foot<'a, Message>| item(f.glyph, f.label, None, f.keys, false, collapsed, f.on_press);
     let body = column![
@@ -170,7 +184,7 @@ pub fn nav_card<'a, Message: Clone + 'a>(
     ]
     .spacing(ROW_GAP);
     floating_card(body)
-        .padding([CARD_PAD_V, 8.0])
+        .padding([CARD_PAD_V, CARD_PAD_H])
         .width(if collapsed { NAV_THIN } else { NAV })
         .height(Fill)
         .into()

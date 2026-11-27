@@ -26,18 +26,6 @@ pub fn card<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Elemen
     shell(content, [PAD, PAD], |t| (t.card_idle, t.divider))
 }
 
-/// A group of setting rows (`setting_row::card`): the rows carry their own height, so only the
-/// sides are padded; white on a light theme's grey pane (`side_panel::pane`), the `hover` tile on
-/// a dark one.
-pub fn grouped<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    shell(content, [0.0, PAD], |t| {
-        match super::themes::current().light {
-            true => (t.widget, t.rim),
-            false => (t.hover, t.rim),
-        }
-    })
-}
-
 /// The one card surface: radius 12, a 1 px edge, `fill_edge` picks the fill and the edge.
 fn shell<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,

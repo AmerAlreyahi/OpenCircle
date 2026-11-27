@@ -31,7 +31,6 @@ pub mod space {
     pub const ROW_Y: f32 = 10.0;
     pub const PAGE: [f32; 2] = [16.0, 20.0];
     pub const CARD: [f32; 2] = [9.0, 10.0];
-    pub const SIDEBAR_PAD: f32 = 10.0;
     /// Inside a toolbar's panel (`surface::panel`).
     pub const PANEL: f32 = 12.0;
 }

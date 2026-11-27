@@ -18,16 +18,19 @@ use crate::shared::config::{
     StudioPrefs, StudioSide, StudioWheel, StudioZoom,
 };
 use crate::shared::kit::button::{self, Kind, label};
+use crate::shared::kit::choice_card::{Choice as Card, Mark, choice_cards};
 use crate::shared::kit::dropdown::dropdown;
 use crate::shared::kit::field::field;
+use crate::shared::kit::floating_card::{floating_card, pane};
+use crate::shared::kit::icon::Icon;
+use crate::shared::kit::nav_card::{self, Entry, entry_list};
 use crate::shared::kit::scroll::scroll;
+use crate::shared::kit::section::section;
 use crate::shared::kit::segmented::{boolean, segmented};
 use crate::shared::kit::setting_row::{self, title};
-use crate::shared::kit::sidebar::{Item, list};
-use crate::shared::kit::surface::{Material, surface};
-use crate::shared::kit::text::{error, muted};
+use crate::shared::kit::text::error;
 use crate::shared::kit::themes::{self, THEMES};
-use crate::shared::kit::tokens::{Role, radius, space};
+use crate::shared::kit::tokens::{Role, radius, settings, space};
 use crate::shared::kit::tooltip::tip;
 use crate::shared::kit::{divider, modal, option_list};
 use crate::t;
@@ -355,56 +358,55 @@ impl Dialog {
         }
     }
 
-    /// The dialog: a list of sections on the left; on the right the section's title and
-    /// one-line subtitle with the X at the top, then its rows in small-headed groups.
+    /// The dialog in the Settings look: on a calm pane two floating cards, the section list and
+    /// the page. The page card keeps the dialog's header (the section's title and one-line
+    /// subtitle with the X), then its rows in bordered sections.
     pub fn view(&self, window: Size) -> Element<'_, Msg> {
-        let items = Tab::ALL.map(|t| Item {
+        let entries = Tab::ALL.map(|t| Entry {
             label: t.name(),
-            badge: None,
-            icon: Some(t.icon()),
+            glyph: t.icon(),
+            tail: None,
+            group: 0,
         });
         let active = Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0);
-        let nav =
-            container(list(&items, active, |i| Msg::Tab(Tab::ALL[i]))).padding(space::SIDEBAR_PAD);
-        // the list is part of the card, not a box beside it: a recessed column on the card's
-        // start side, as tall as the card, its outer corners the card's own
-        let nav =
-            crate::shared::kit::side_panel::inset(scroll(nav).into(), NAV, radius::CARD - 1.0);
+        let nav = floating_card(scroll(
+            container(entry_list(&entries, active, false, |i| {
+                Msg::Tab(Tab::ALL[i])
+            }))
+            .padding([nav_card::CARD_PAD_V, nav_card::CARD_PAD_H]),
+        ))
+        .width(NAV)
+        .height(Fill);
         let head = container(modal::header(
             self.tab.name(),
             Some(self.tab.subtitle()),
             Msg::Close,
         ))
         .padding([space::PAGE[1], space::PAGE[1]]);
-        // the rows sit in one centred column at most CONTENT wide, so a label and its control
+        // the sections sit in one centred column at most CONTENT wide, so a label and its control
         // stay together however wide the dialog grows
         let page = container(container(self.rows()).width(Fill).max_width(CONTENT)).center_x(Fill);
         let body = scroll(container(page).padding([0.0, space::PAGE[1]])).height(Length::Fill);
-        let page = crate::shared::kit::side_panel::pane(
-            column![head, divider::divider(), body].width(Fill).into(),
-            radius::CARD - 1.0,
-        );
-        let content = crate::dir_row![nav, divider::vertical(Fill), page];
+        let page = floating_card(column![head, divider::divider(), body].width(Fill)).height(Fill);
+        let content = crate::dir_row![nav, page]
+            .spacing(settings::GUTTER)
+            .padding(settings::GUTTER);
         let (w, h) = card_size(window);
-        surface(Material::Widget, radius::CARD, content)
+        pane(content, radius::CARD)
             .width(Length::Fixed(w))
             .height(Length::Fixed(h))
             .into()
     }
 
-    /// The rows of the open section, in groups with a small heading each.
+    /// The rows of the open section, in bordered sections with a small heading each.
     fn rows(&self) -> Element<'_, Msg> {
-        let mut page = column![].spacing(space::PAGE[1]);
-        for (heading, rows) in self.groups(self.tab, &|_| true) {
-            let mut group = column![]
-                .spacing(space::GAP)
-                .align_x(crate::shared::kit::dir::start());
-            if !heading.is_empty() {
-                group =
-                    group.push(container(muted(Role::SECTION, heading)).padding([0.0, space::GAP]));
-            }
-            let rows = rows.into_iter().map(|(_, e)| e).collect();
-            page = page.push(group.push(setting_row::card(rows)));
+        let mut page = column![].spacing(settings::SECTION_GAP);
+        // (built under the sections' rule: a card block draws no rule of its own)
+        let groups = setting_row::ruled_by_section(|| self.groups(self.tab, &|_| true));
+        for (heading, rows) in groups {
+            let rows: Vec<_> = rows.into_iter().map(|(_, e)| e).collect();
+            let heading = Some(heading).filter(|h| !h.is_empty());
+            page = page.push(section(heading, None, move || rows));
         }
         container(page).padding([space::PAGE[1], 0.0]).into()
     }
@@ -580,21 +582,37 @@ impl Dialog {
                                 Msg::UiZoom(z.0)
                             }),
                         ),
-                        row!(
-                            t!(ss_bg),
-                            t!(ss_bg_d),
-                            segmented(
-                                &[
-                                    (StudioBackdrop::Theme, t!(ss_bg_theme)),
-                                    (StudioBackdrop::Checkerboard, t!(ss_bg_check)),
-                                    (StudioBackdrop::Dark, t!(ss_bg_dark)),
-                                ],
-                                p.background,
-                                p.background,
-                                1.0,
-                                move |v| edit(&|s| s.background = v),
-                            ),
-                        ),
+                        want(t!(ss_bg)).then(|| {
+                            (
+                                t!(ss_bg),
+                                card_row(
+                                    t!(ss_bg),
+                                    t!(ss_bg_d),
+                                    vec![
+                                        (
+                                            StudioBackdrop::Theme,
+                                            Icon::Palette,
+                                            t!(ss_bg_theme),
+                                            t!(ss_bg_theme_d),
+                                        ),
+                                        (
+                                            StudioBackdrop::Checkerboard,
+                                            Icon::Picture,
+                                            t!(ss_bg_check),
+                                            t!(ss_bg_check_d),
+                                        ),
+                                        (
+                                            StudioBackdrop::Dark,
+                                            Icon::Circle,
+                                            t!(ss_bg_dark),
+                                            t!(ss_bg_dark_d),
+                                        ),
+                                    ],
+                                    p.background,
+                                    move |v| edit(&|s| s.background = v),
+                                ),
+                            )
+                        }),
                     ],
                 )]
             }
@@ -631,8 +649,25 @@ impl Dialog {
                     (
                         t!(pf_grp_file),
                         vec![
-                            format_row!(t!(ss_format), t!(ss_format_d), p.format, |s, f| {
-                                s.format = f
+                            want(t!(ss_format)).then(|| {
+                                (
+                                    t!(ss_format),
+                                    card_row(
+                                        t!(ss_format),
+                                        t!(ss_format_d),
+                                        vec![
+                                            (Format::Png, Icon::Picture, t!(s_png), t!(ss_png_d)),
+                                            (
+                                                Format::Jpeg,
+                                                Icon::Picture,
+                                                t!(s_jpeg),
+                                                t!(ss_jpeg_d),
+                                            ),
+                                        ],
+                                        p.format,
+                                        move |f| edit(&|s| s.format = f),
+                                    ),
+                                )
                             }),
                             row!(
                                 t!(ss_quality),
@@ -842,6 +877,29 @@ impl Dialog {
             ("", vec![reset_all]),
         ]
     }
+}
+
+/// A row of choice cards (the Settings look): `title`, its line, then one card per option.
+fn card_row<'a, T: Copy + PartialEq + 'a>(
+    name: &'static str,
+    desc: &'static str,
+    options: Vec<(T, Icon, &'static str, &'static str)>,
+    now: T,
+    pick: impl Fn(T) -> Msg + 'a,
+) -> Element<'a, Msg> {
+    let cards: Vec<_> = (options.iter())
+        .map(|&(_, icon, title_, line)| Card {
+            mark: Mark::Glyph(icon.glyph()),
+            title: title_,
+            desc: line,
+        })
+        .collect();
+    let at = options.iter().position(|o| o.0 == now).unwrap_or(0);
+    setting_row::block(
+        title(name),
+        desc,
+        choice_cards(&cards, at, move |i| pick(options[i].0)),
+    )
 }
 
 /// `c`'s editor options back at the defaults (Line assist is a setting, not a tool style).
@@ -1067,5 +1125,44 @@ mod tests {
         d.apply(&mut c);
         assert_eq!((c.snip.max_edge, c.studio.snap), (1024, true));
         assert_eq!(c.studio.theme, "obsidian");
+    }
+
+    /// D-05: the Appearance and Saving pages carry the Settings look's choice cards (each says
+    /// what it does), the dialog's header stays today's (section title, its line, the X), and
+    /// Settings > Studio gets the same Format row from `rows_named` (one source).
+    #[test]
+    fn d05_choice_cards_sections_and_the_unchanged_header() {
+        use crate::shared::kit::testing::shot;
+        crate::shared::kit::text::load();
+        let size = Size::new(1280.0, 800.0);
+        for lang in [Lang::En, Lang::Ar] {
+            app_language::set(lang);
+            let seen = |tab: Tab| {
+                let mut d = dialog();
+                d.update(Msg::Tab(tab));
+                shot::texts_at(d.view(size), size)
+                    .into_iter()
+                    .map(|(_, t)| t)
+                    .collect::<Vec<_>>()
+            };
+            let look = seen(Tab::Appearance);
+            for want in [
+                S::ss_bg_theme_d,
+                S::ss_bg_check_d,
+                S::ss_bg_dark_d,
+                S::pf_grp_theme,
+                S::nav_appearance,
+                S::pf_sub_appearance,
+            ] {
+                assert!(look.iter().any(|t| t == tr(want)), "{lang:?}: {want:?}");
+            }
+            let saving = seen(Tab::Saving);
+            for want in [S::ss_png_d, S::ss_jpeg_d] {
+                assert!(saving.iter().any(|t| t == tr(want)), "{lang:?}: {want:?}");
+            }
+            // the one source: Settings > Studio asks for the same row
+            assert_eq!(dialog().rows_named(&[tr(S::ss_format)]).len(), 1);
+        }
+        app_language::set(Lang::En);
     }
 }

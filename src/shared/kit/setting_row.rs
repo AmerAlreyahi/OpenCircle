@@ -154,18 +154,6 @@ pub fn plain<'a, Message: 'a>(
     row_with(title, desc, control, false)
 }
 
-/// `rows` (made with `plain`) in one card: a hairline between them, none after the last.
-pub fn card<'a, Message: 'a>(rows: Vec<Element<'a, Message>>) -> Element<'a, Message> {
-    let mut list = column![];
-    for (i, row) in rows.into_iter().enumerate() {
-        if i > 0 {
-            list = list.push(divider());
-        }
-        list = list.push(row);
-    }
-    super::card::grouped(list)
-}
-
 fn row_with<'a, Message: 'a>(
     title: Element<'a, Message>,
     desc: impl IntoFragment<'a>,

@@ -2651,6 +2651,16 @@ strings! {
         | "رقعة الشطرنج";
     ss_bg_dark: "Dark"
         | "داكن";
+    ss_bg_theme_d: "Calm, follows light or dark"
+        | "هادئة، تتبع الفاتح أو الداكن";
+    ss_bg_check_d: "Shows transparent areas"
+        | "تُظهر المناطق الشفافة";
+    ss_bg_dark_d: "Always dark, best for light pictures"
+        | "داكنة دائمًا، الأفضل للصور الفاتحة";
+    ss_png_d: "Sharp, larger files"
+        | "حادة، ملفات أكبر";
+    ss_jpeg_d: "Smaller files, set the quality"
+        | "ملفات أصغر، اختر الجودة";
     ss_zoom: "Zoom on open"
         | "التكبير عند الفتح";
     ss_zoom_d: "How big a picture first shows"

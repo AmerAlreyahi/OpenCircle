@@ -11,7 +11,7 @@ use super::super::tokens::{Role, radius};
 use super::super::{
     button, card, chip, choice_card, divider, error_card, field, floating_card, header, nav_card,
     page_head, panel_frame, progress, scroll, search_card, section, segmented, setting_row,
-    sidebar, surface, theme_preview, toast,
+    surface, theme_preview, toast,
 };
 use super::{golden, shot};
 
@@ -341,20 +341,12 @@ fn chip_sheet() {
 
 #[test]
 fn card_sheet() {
-    let rows = vec![
-        row("info", Act::Rest, |ar| {
-            card::card(super::super::text::text(
-                Role::ROW_TITLE,
-                s(ar, "Made by others", "صنعه آخرون"),
-            ))
-        }),
-        row("grouped", Act::Rest, |ar| {
-            card::grouped(super::super::text::text(
-                Role::ROW_TITLE,
-                s(ar, "Rows of settings", "صفوف الإعدادات"),
-            ))
-        }),
-    ];
+    let rows = vec![row("info", Act::Rest, |ar| {
+        card::card(super::super::text::text(
+            Role::ROW_TITLE,
+            s(ar, "Made by others", "صنعه آخرون"),
+        ))
+    })];
     let theme = |selected| {
         move |_| {
             card::theme_card(
@@ -491,46 +483,6 @@ fn setting_row_sheet() {
         )
     })];
     sheet("setting_row", Size::new(560.0, 120.0), &rows);
-}
-
-/// A dialog's section list: icons, the active one a raised pill with an accent bar.
-#[test]
-fn sidebar_list_sheet() {
-    use sidebar::{Item, list};
-    let view = |active: usize| {
-        move |ar| {
-            let items = [
-                Item {
-                    label: s(ar, "General", "عام"),
-                    badge: None,
-                    icon: Some('\u{e157}'),
-                },
-                Item {
-                    label: s(ar, "Saving and export", "الحفظ والتصدير"),
-                    badge: None,
-                    icon: Some('\u{e0b6}'),
-                },
-                Item {
-                    label: s(ar, "Editing", "التحرير"),
-                    badge: None,
-                    icon: Some('\u{e1f8}'),
-                },
-            ];
-            iced::widget::container(list(&items, active, |_| ()))
-                .width(220.0)
-                .padding(10.0)
-                .into()
-        }
-    };
-    let rows = vec![
-        row("first", Act::Rest, view(0)),
-        row("second", Act::Rest, view(1)),
-        Row {
-            x: Some(60.0),
-            ..row("hover", Act::Hover, view(0))
-        },
-    ];
-    sheet("sidebar", Size::new(240.0, 150.0), &rows);
 }
 
 #[test]

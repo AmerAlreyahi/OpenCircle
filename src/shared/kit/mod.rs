@@ -53,7 +53,6 @@ pub mod segmented;
 pub mod setting_row;
 pub mod shortcut_field;
 pub mod side_panel;
-pub mod sidebar;
 pub mod slide_over;
 pub mod slide_pages;
 pub mod slider;

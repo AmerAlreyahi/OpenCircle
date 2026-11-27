@@ -24,11 +24,14 @@ pub fn floating_card<'a, Message: 'a>(
     })
 }
 
-/// The calm pane the cards float on: a window's body in `sidebar`, with the window's 1 px rim.
-pub fn pane<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Container<'a, Message> {
-    container(content).style(|_| container::Style {
+/// The calm pane the cards float on: a window's body (or a dialog's, `radius` its corners) in `sidebar`, with the 1 px rim.
+pub fn pane<'a, Message: 'a>(
+    content: impl Into<Element<'a, Message>>,
+    radius: f32,
+) -> Container<'a, Message> {
+    container(content).style(move |_| container::Style {
         background: Some(c().sidebar.into()),
-        border: Border::default().width(1).color(c().rim),
+        border: Border::default().rounded(radius).width(1).color(c().rim),
         ..container::Style::default()
     })
 }

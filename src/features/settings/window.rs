@@ -84,7 +84,7 @@ pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
     let rim = if maximised { 0.0 } else { RIM };
     // Tab / Shift+Tab walk the sidebar, then the page (`kit::focus`)
     let window = crate::shared::kit::focus::scope(
-        crate::shared::kit::floating_card::pane(column![header, main])
+        crate::shared::kit::floating_card::pane(column![header, main], 0.0)
             .padding(rim)
             .width(Fill)
             .height(Fill),
