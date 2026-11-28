@@ -694,6 +694,16 @@ pub(crate) fn overlay_key(app: &mut App, key: &str) {
     let event = match key {
         "menu" => Event::ContextKey,
         "enter" => Event::Enter,
+        "tab" => Event::Tab { back: false },
+        "shift+tab" => Event::Tab { back: true },
+        "ctrl+c" => Event::Key {
+            letter: 'c',
+            ctrl: true,
+        },
+        letter if letter.len() == 1 => Event::Key {
+            letter: letter.chars().next().unwrap(),
+            ctrl: false,
+        },
         other => panic!("no such key: {other}"),
     };
     let _ = app.update(Message::Overlay(event));

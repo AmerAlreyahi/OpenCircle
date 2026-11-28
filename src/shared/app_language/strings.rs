@@ -2901,6 +2901,12 @@ strings! {
         | "الالتقاط";
     sn_picture: "Picture"
         | "الصورة";
+    sn_mode_picture: "Picture"
+        | "صورة";
+    sn_mode_video: "Video"
+        | "فيديو";
+    sn_mode_audio: "Audio"
+        | "صوت";
     ss_after: "After a capture"
         | "بعد الالتقاط";
     ss_after_d: "Where a picture opens once you have picked an area"

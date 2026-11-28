@@ -63,8 +63,39 @@ impl Kind {
     }
 }
 
+/// The Picture | Video | Audio switch at the top of the pick screen (never remembered:
+/// every pick starts on Picture, or on Video when the record-video key opened it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Picture,
+    Video,
+    Audio,
+}
+
+impl Mode {
+    pub const ALL: [Mode; 3] = [Mode::Picture, Mode::Video, Mode::Audio];
+
+    /// The key that picks it while picking (Tab cycles).
+    pub fn of_key(letter: char) -> Option<Mode> {
+        match letter {
+            'p' => Some(Mode::Picture),
+            'v' => Some(Mode::Video),
+            'a' => Some(Mode::Audio),
+            _ => None,
+        }
+    }
+
+    /// The next one (Tab) or the one before (Shift+Tab).
+    pub fn cycled(self, back: bool) -> Mode {
+        let at = Mode::ALL.iter().position(|&m| m == self).unwrap_or(0);
+        Mode::ALL[(at + if back { 2 } else { 1 }) % 3]
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Msg {
+    /// The switch: Picture / Video stay in this pick, Audio starts a recording at once.
+    Mode(Mode),
     /// Long capture ends so (Enter = Copy; the toolbar's Copy / Save / Pin /
     /// Share; Esc / close = Cancel).
     Finish(crate::features::snip::screens::long_capture::Finish),
@@ -770,12 +801,60 @@ impl Snip {
         self.recent = recent;
     }
 
+    /// The switch shows while an area is still to be picked: not once dragging, not for the
+    /// recording bar's Hide pick or a live pin, not in a long capture or a tool.
+    pub fn switch_shown(&self) -> bool {
+        self.press.is_none()
+            && self.hide.is_none()
+            && !self.live_pin
+            && self.scroll.is_none()
+            && self.tool.is_none()
+            && self.countdown.is_none()
+    }
+
+    /// What the switch shows: Video when the record-video key opened this pick.
+    pub fn mode(&self) -> Mode {
+        match self.record {
+            true => Mode::Video,
+            false => Mode::Picture,
+        }
+    }
+
+    /// Picture / Video only mean something here (Audio leaves the pick at once).
+    pub fn set_mode(&mut self, mode: Mode) {
+        self.record = mode == Mode::Video;
+    }
+
     /// The hint and Recent, at the top of the screen.
+    #[cfg(test)]
     pub fn view(&self) -> Element<'_, Msg> {
+        self.view_with(true)
+    }
+
+    /// `view`, with the switch only while `picking` (nothing picked yet).
+    pub fn view_with(&self, picking: bool) -> Element<'_, Msg> {
         // No mode switch: hover + click picks a control or a window, a drag an
         // area, the wheel walks up to the screen (quick actions still start in
         // Window or Full mode).
         let mut top = column![].spacing(space::PAGE[0]).align_x(Center);
+        if picking && self.switch_shown() {
+            let options = [
+                (Mode::Picture, t!(sn_mode_picture)),
+                (Mode::Video, t!(sn_mode_video)),
+                (Mode::Audio, t!(sn_mode_audio)),
+            ];
+            let pill = crate::shared::kit::segmented::inline_keyed(
+                &options,
+                &[
+                    (Icon::Camera, "P"),
+                    (Icon::Video, "V"),
+                    (Icon::Waveform, "A"),
+                ],
+                self.mode(),
+                Msg::Mode,
+            );
+            top = top.push(surface(Material::Tray, radius::FULL, pill).padding(space::BAR_PAD));
+        }
         if !self.recent.is_empty() {
             let shots = (self.recent.iter()).map(|(path, picture)| {
                 let shown = image(picture.clone()).content_fit(iced::ContentFit::Contain);

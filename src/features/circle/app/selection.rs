@@ -468,6 +468,20 @@ impl App {
                 }
                 return Task::batch([self.selected(), settle]);
             }
+            // Snip's pick screen: P / V / A and Tab drive the Picture | Video | Audio switch.
+            overlay::Event::Key {
+                letter: letter @ ('p' | 'v' | 'a'),
+                ctrl: false,
+            } if self.pick_switch_on() => {
+                let mode = pick::Mode::of_key(letter).unwrap_or(pick::Mode::Picture);
+                return self.on_pick_mode(mode);
+            }
+            overlay::Event::Tab { back } if self.pick_switch_on() && !self.bottom_bar_shown() => {
+                if let Purpose::Snip(s) = &self.o.purpose {
+                    let next = s.mode().cycled(back);
+                    return self.on_pick_mode(next);
+                }
+            }
             // Tab moved the focus onto a bar button: Enter / Space press it.
             overlay::Event::Enter | overlay::Event::Space
                 if let Some(stop) = self.o.bar_focus

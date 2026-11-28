@@ -108,6 +108,8 @@ pub enum Icon {
     Waveform,
     /// lucide "plus" (Add a language pair).
     Plus,
+    /// lucide "camera" (Snip's pick switch: Picture).
+    Camera,
     /// lucide "focus" (Circle to Search: brackets round a small square).
     Focus,
     Globe,
@@ -115,7 +117,7 @@ pub enum Icon {
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 57] = [
+    pub const ALL: [Icon; 58] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -171,6 +173,7 @@ impl Icon {
         Icon::Video,
         Icon::Waveform,
         Icon::Plus,
+        Icon::Camera,
         Icon::Focus,
         Icon::Globe,
     ];
@@ -243,6 +246,7 @@ impl Icon {
             Icon::Video => '\u{e1a4}',
             Icon::Waveform => '\u{e55e}',
             Icon::Plus => '\u{e140}',
+            Icon::Camera => '\u{e068}',
             Icon::Globe => '\u{e0eb}',
         }
     }

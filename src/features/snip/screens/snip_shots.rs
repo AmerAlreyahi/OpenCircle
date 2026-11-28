@@ -416,3 +416,28 @@ fn the_snip_screens_match_their_golden_images() {
         }
     });
 }
+
+/// The pick screen with its Picture | Video | Audio pill (the pointer on the wallpaper), English
+/// and Arabic (mirrored), Video selected too, both themes.
+#[test]
+fn the_pick_screen_switch_matches_its_golden_images() {
+    let mut failed = Vec::new();
+    for theme in [&SAPPHIRE, &DAYLIGHT] {
+        themes::set(theme);
+        for (name, rtl, video) in [
+            // English on Picture is snip-1-freeze (the same frame)
+            ("pickmode-video", false, true),
+            ("pickmode-ar", true, false),
+        ] {
+            let _ar = rtl.then(crate::shared::kit::testing::arabic);
+            let mut app = snipping();
+            if video {
+                let _ = app.on_pick_mode(pick::Mode::Video);
+            }
+            let _ = app.on_overlay(Event::Hover(Point::new(1100.0, 640.0)));
+            failed.extend(shoot(&format!("snip-{name}-{}", theme.id), &mut app).err());
+        }
+    }
+    themes::set(&SAPPHIRE);
+    assert!(failed.is_empty(), "{failed:#?}");
+}

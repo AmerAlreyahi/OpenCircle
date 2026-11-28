@@ -3,6 +3,7 @@
 use iced::widget::{Space, button, container, row, stack, text};
 use iced::{Border, Element, Fill, Size};
 
+use super::icon::Icon;
 use super::themes::c;
 use super::tokens::{Role, radius, size, space};
 
@@ -39,7 +40,16 @@ pub fn segmented<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
     for w in &mut widths {
         *w += (room / n).max(0.0);
     }
-    track(options, &widths, Role::CONTROL, chosen, from, glide, on)
+    track(
+        options,
+        &widths,
+        Role::CONTROL,
+        chosen,
+        from,
+        glide,
+        &[],
+        on,
+    )
 }
 
 /// `segmented` only as wide as its labels (a toolbar, the installer).
@@ -51,7 +61,40 @@ pub fn inline<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
     on: impl Fn(T) -> Message + 'a,
 ) -> Element<'a, Message> {
     let widths: Vec<f32> = options.iter().map(|&(_, l)| pill_width(l)).collect();
-    track(options, &widths, Role::CONTROL, chosen, from, glide, on)
+    track(
+        options,
+        &widths,
+        Role::CONTROL,
+        chosen,
+        from,
+        glide,
+        &[],
+        on,
+    )
+}
+
+/// `inline` whose pills each lead with an icon and carry their key in a tooltip
+/// (`marks[i]` = (icon, key) for `options[i]`, "Video · V"): a switch driven by the
+/// keyboard too (Snip's Picture | Video | Audio).
+pub fn inline_keyed<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
+    options: &[(T, &'a str)],
+    marks: &[(Icon, &'a str)],
+    chosen: T,
+    on: impl Fn(T) -> Message + 'a,
+) -> Element<'a, Message> {
+    let widths: Vec<f32> = (options.iter())
+        .map(|&(_, l)| pill_width(l) + MARK + MARK_GAP)
+        .collect();
+    track(
+        options,
+        &widths,
+        Role::CONTROL,
+        chosen,
+        chosen,
+        1.0,
+        marks,
+        on,
+    )
 }
 
 /// The full-width track (onboarding's steps, `oc-track w-full` with `flex-1`
@@ -66,7 +109,7 @@ pub fn spread<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
 ) -> Element<'a, Message> {
     let labels: Vec<&str> = options.iter().map(|&(_, l)| l).collect();
     let (widths, _) = spread_layout(width, &labels);
-    track(options, &widths, Role::STEP, chosen, from, glide, on)
+    track(options, &widths, Role::STEP, chosen, from, glide, &[], on)
 }
 
 /// `spread`'s pill widths for `labels` in a track `width` across, and whether each label
@@ -100,9 +143,13 @@ const SPREAD_PAD: f32 = 6.0;
 
 /// A pill's height: 12 px x 1.25 and 6 px above and below.
 const PILL: f32 = 27.0;
+/// A keyed pill's leading icon and its gap to the label.
+const MARK: f32 = 15.0;
+const MARK_GAP: f32 = 6.0;
 /// The whole track's height: a setting row's single button is this tall too.
 pub const TRACK_H: f32 = PILL + 2.0 * space::TRACK_PAD;
 
+#[allow(clippy::too_many_arguments)] // one private builder for the four track shapes
 fn track<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
     options: &[(T, &'a str)],
     widths: &[f32],
@@ -110,12 +157,16 @@ fn track<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
     chosen: T,
     from: T,
     glide: f32,
+    marks: &[(Icon, &'a str)],
     on: impl Fn(T) -> Message + 'a,
 ) -> Element<'a, Message> {
     const GAP: f32 = space::TRACK_GAP;
     let on = std::rc::Rc::new(on);
     let values: Vec<T> = options.iter().map(|&(v, _)| v).collect();
     // right to left: the first option at the right (Off right, On left)
+    let tips: Vec<Option<(Icon, &'a str)>> =
+        (0..options.len()).map(|i| marks.get(i).copied()).collect();
+    let tips = super::dir::order(tips);
     let options = &super::dir::order(options.to_vec())[..];
     let widths = &super::dir::order(widths.to_vec())[..];
     let at = |value: T| {
@@ -144,43 +195,61 @@ fn track<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
     ]
     // the base layer of the stack sets its size: as wide as all the pills
     .width(widths.iter().map(|w| w + GAP).sum::<f32>() - GAP);
-    let pills = options.iter().zip(widths).map(|(&(value, label), &w)| {
-        let active = value == chosen;
-        let on = on.clone();
-        // centred by its box, the text exactly as wide as drawn: a wider box
-        // lays a right-to-left line out from its right edge (Arabic sat right
-        // of the thumb on Windows), and the text's own centring shifts it too
-        let drawn = super::text::width(label, super::text::size(role), super::text::font(role));
-        button(
-            container(
-                text(label)
-                    .size(super::text::size(role))
-                    .font(super::text::font(role))
-                    .line_height(1.25)
-                    .wrapping(text::Wrapping::None)
-                    .width(drawn.ceil()),
-            )
-            .center_x(Fill),
-        )
-        .width(w)
-        .padding([6, 0])
-        .height(PILL)
-        .on_press(on(value)) // mouse only: the track is one focus stop (`choices`)
-        .style(move |_, status| {
-            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-            button::Style {
-                background: (!active && hovered).then(|| c().hover.into()),
-                text_color: if active || hovered {
-                    c().text
-                } else {
-                    c().text_sub
-                },
-                border: Border::default().rounded(radius::PILL),
-                ..button::Style::default()
+    let pills = options
+        .iter()
+        .zip(widths)
+        .zip(tips)
+        .map(|((&(value, label), &w), mark)| {
+            let active = value == chosen;
+            let on = on.clone();
+            // centred by its box, the text exactly as wide as drawn: a wider box
+            // lays a right-to-left line out from its right edge (Arabic sat right
+            // of the thumb on Windows), and the text's own centring shifts it too
+            let drawn = super::text::width(label, super::text::size(role), super::text::font(role));
+            let words = text(label)
+                .size(super::text::size(role))
+                .font(super::text::font(role))
+                .line_height(1.25)
+                .wrapping(text::Wrapping::None)
+                .width(drawn.ceil());
+            let face: Element<'a, Message> = match mark {
+                Some((glyph, _)) => {
+                    super::dir::row(vec![super::icon::icon(glyph, MARK).into(), words.into()])
+                        .spacing(MARK_GAP)
+                        .align_y(iced::Center)
+                        .into()
+                }
+                None => words.into(),
+            };
+            let pill = button(container(face).center_x(Fill))
+                .width(w)
+                .padding([6, 0])
+                .height(PILL)
+                .on_press(on(value)) // mouse only: the track is one focus stop (`choices`)
+                .style(move |_, status| {
+                    let hovered =
+                        matches!(status, button::Status::Hovered | button::Status::Pressed);
+                    button::Style {
+                        background: (!active && hovered).then(|| c().hover.into()),
+                        text_color: if active || hovered {
+                            c().text
+                        } else {
+                            c().text_sub
+                        },
+                        border: Border::default().rounded(radius::PILL),
+                        ..button::Style::default()
+                    }
+                });
+            match mark {
+                Some((_, k)) => super::tooltip::hint(
+                    pill,
+                    label,
+                    super::tooltip::Why::Keys(k),
+                    iced::widget::tooltip::Position::Bottom,
+                ),
+                None => pill.into(),
             }
-        })
-        .into()
-    });
+        });
     let pills = row(pills).spacing(GAP).height(PILL);
     let track = container(stack![thumb, pills])
         .padding(space::TRACK_PAD)

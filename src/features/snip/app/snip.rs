@@ -8,6 +8,7 @@ use iced::widget::image;
 use iced::window::{self, Mode};
 use iced::{Point, Rectangle, Size, Task, Vector};
 
+use crate::features::snip::record::state::State as RecState;
 use crate::features::{
     circle::actions::{Run, copy, save},
     text_reading::text,
@@ -38,6 +39,9 @@ impl App {
             }
             self.timed = true;
             return self.capture(Instant::now(), Some(kind));
+        }
+        if let pick::Msg::Mode(mode) = msg {
+            return self.on_pick_mode(mode);
         }
         if let pick::Msg::Tool(msg) = msg {
             return self.on_tool(msg);
@@ -182,7 +186,7 @@ impl App {
                 Task::none()
             }
             pick::Msg::HintGone(_) => Task::none(),
-            pick::Msg::Tool(_) | pick::Msg::Progress(_) => Task::none(), // handled above
+            pick::Msg::Tool(_) | pick::Msg::Progress(_) | pick::Msg::Mode(_) => Task::none(), // handled above
         }
     }
 
@@ -425,6 +429,37 @@ impl App {
         (self.o.bar_now, self.o.bar_glide, self.o.bar_left) = (None, None, None); // it rises from the area
         self.o.edit = Some(edit);
         self.select(area); // the overlay's dim and outline follow it
+    }
+
+    /// The pick screen's Picture | Video | Audio switch. Picture and Video only change what the
+    /// pick leads to (`snip_next`: the editor, or `record_picked` = the R1 bar); Audio closes the
+    /// pick and starts the SAME flow as Alt+Shift+M (`record_key`); while a recording runs Audio
+    /// does nothing (the pick stays, never lost for a recording that can't start).
+    pub(crate) fn on_pick_mode(&mut self, mode: pick::Mode) -> Task<Message> {
+        let can_record = matches!(
+            self.rec.state,
+            RecState::Idle | RecState::Result { .. } | RecState::Error(_)
+        );
+        let Purpose::Snip(snip) = &mut self.o.purpose else {
+            return Task::none();
+        };
+        if mode == pick::Mode::Audio && !can_record {
+            return Task::none();
+        }
+        snip.set_mode(mode);
+        if mode != pick::Mode::Audio {
+            return Task::none();
+        }
+        let closed = self.close();
+        Task::batch([closed, self.record_key(true, Instant::now())])
+    }
+
+    /// The pick screen's switch is up (and owns P / V / A and Tab): a Snip pick with nothing
+    /// picked yet and no editor (`pick::Snip::switch_shown` says the rest).
+    pub(crate) fn pick_switch_on(&self) -> bool {
+        matches!(&self.o.purpose, Purpose::Snip(s) if s.switch_shown())
+            && self.o.selection.is_none()
+            && self.o.edit.is_none()
     }
 
     /// Where a snip pick leads: the editor on the area, or a scrolling capture.

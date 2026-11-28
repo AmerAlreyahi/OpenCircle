@@ -299,7 +299,7 @@ impl App {
                     ))
                     .map(pick::Msg::Tool)
                 }
-                (None, None) => snip.view(),
+                (None, None) => snip.view_with(self.pick_switch_on()),
             }
             .map(Message::Snip)
         } else if let Some(selection) = self.o.selection {
