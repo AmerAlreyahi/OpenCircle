@@ -93,7 +93,7 @@ impl Drop for Callback {
 
 struct Receive {
     path: String,
-    html: String,
+    page: Box<dyn Fn(&str) -> String + Send + Sync>,
     tx: Mutex<Option<mpsc::Sender<String>>>,
     stop: Arc<AtomicBool>,
 }
@@ -104,7 +104,7 @@ impl Handler for Receive {
         let tx = self.tx.lock().ok()?.take()?;
         let _ = tx.send(query.to_string());
         Some(response(
-            &self.html,
+            &(self.page)(query),
             "default-src 'none'; style-src 'unsafe-inline'",
         ))
     }
@@ -113,15 +113,18 @@ impl Handler for Receive {
     }
 }
 
-/// Waits at most `life` for one callback; `html` is what the browser shows
-/// after it ("you can close this tab").
-pub fn receive(html: &str, life: Duration) -> io::Result<Callback> {
+/// Waits at most `life` for one callback; `page` makes what the browser shows after it from the
+/// callback's query ("you can close this tab", or why it did not work).
+pub fn receive(
+    page: impl Fn(&str) -> String + Send + Sync + 'static,
+    life: Duration,
+) -> io::Result<Callback> {
     let secret = secret()?;
     let (tx, query) = mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
     let handler = Receive {
         path: format!("/{secret}"),
-        html: html.to_string(),
+        page: Box::new(page),
         tx: Mutex::new(Some(tx)),
         stop: stop.clone(),
     };
@@ -579,7 +582,7 @@ mod tests {
     /// localhost) hands the query over, once; then the port closes.
     #[test]
     fn a_callback_hands_its_query_over_once() {
-        let cb = receive("<p>done</p>", LIFE).unwrap();
+        let cb = receive(|_| "<p>done</p>".into(), LIFE).unwrap();
         let rest = cb.url.strip_prefix("http://localhost:").unwrap();
         let (port, path) = rest.split_at(rest.find('/').unwrap());
         assert_eq!(path.len(), 33, "a 128-bit secret path");
@@ -606,7 +609,7 @@ mod tests {
         );
         closed(&url);
         // Cancel: dropping the callback closes the port while it waits.
-        let cb = receive("<p>done</p>", LIFE).unwrap();
+        let cb = receive(|_| "<p>done</p>".into(), LIFE).unwrap();
         let url = cb.url.replace("localhost", "127.0.0.1");
         drop(cb);
         closed(&url);

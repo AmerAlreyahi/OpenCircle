@@ -19,6 +19,7 @@ pub mod openai;
 pub mod providers;
 pub(crate) mod screens;
 pub mod sign_in;
+mod sign_in_page;
 pub(crate) mod web;
 
 use std::fmt;

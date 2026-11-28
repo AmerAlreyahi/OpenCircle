@@ -382,6 +382,9 @@ pub mod widget_e {
     pub const SEGMENT_PAD_Y_SNIP: f32 = 3.0;
     pub const SEGMENT_PAD_Y_PILL: f32 = 1.0;
     pub const SEGMENT_GAP: f32 = 2.0;
+    /// The space between two floating widgets that belong together (the Snip toolbar and its options
+    /// row: two separate widgets, owner 2026-11-28), logical px, scaled with the window.
+    pub const WIDGET_GAP: f32 = 8.0;
     /// The chat composer's round send / stop button (`.send`).
     pub const SEND: f32 = 30.0;
     /// Quiet close button (`.qx`).

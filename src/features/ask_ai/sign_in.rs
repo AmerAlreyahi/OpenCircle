@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use super::sign_in_page;
 use crate::shared::app_language::{S, tr};
 use crate::shared::net::{self, Policy};
 use crate::shared::platform::sys::serve_once;
@@ -132,6 +133,11 @@ fn code_of(query: &str, state: &str) -> Result<String, SignInError> {
         .ok_or_else(|| SignInError::Failed(tr(S::signin_denied).into()))
 }
 
+/// The callback carries our `state`: it is our sign-in's answer (a refusal, when it has no code).
+fn has_state(query: &str, state: &str) -> bool {
+    (query.split('&').filter_map(|kv| kv.split_once('='))).any(|(k, v)| k == "state" && v == state)
+}
+
 /// Swaps the code for a key at `url`.
 fn exchange(url: &str, policy: Policy, code: &str, verifier: &str) -> Result<Secret, SignInError> {
     let failed = |s: S| SignInError::Failed(tr(s).into());
@@ -170,13 +176,15 @@ fn connect(
     wait: Duration,
 ) -> Result<Secret, SignInError> {
     let failed = |s: S| SignInError::Failed(tr(s).into());
-    let page = format!(
-        "<!doctype html><meta charset=utf-8><title>OpenCircle</title>\
-         <p dir=auto style=\"font:16px system-ui,sans-serif;margin:3em\">{}</p>",
-        tr(S::signin_page)
-    );
-    let callback = serve_once::receive(&page, wait).map_err(|_| failed(S::signin_busy))?;
     let p = pkce()?;
+    // (what the browser shows depends on how the redirect came back)
+    let state = p.state.clone();
+    let page = move |query: &str| match code_of(query, &state) {
+        Ok(_) => sign_in_page::page(sign_in_page::Outcome::Connected),
+        Err(_) if has_state(query, &state) => sign_in_page::page(sign_in_page::Outcome::Cancelled),
+        Err(_) => sign_in_page::page(sign_in_page::Outcome::Failed),
+    };
+    let callback = serve_once::receive(page, wait).map_err(|_| failed(S::signin_busy))?;
     open(&auth_url(&callback.url, &p)).map_err(|_| failed(S::signin_browser))?;
     let end = Instant::now() + wait;
     while Instant::now() < end {

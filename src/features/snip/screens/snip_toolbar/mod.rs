@@ -319,11 +319,9 @@ impl SnipToolbar {
             );
             // (the row's tooltips open away from the toolbar: down under it, up above it)
             let row_above_bar = row_above(at.y, size.height, toolbar::ROW_ROOM, screen.height);
-            let join = join_of(row_above_bar);
+            let join = Join::None; // (two separate widgets: both trays keep their round corners)
             let row =
                 toolbar::options_row_tips(&self.annotator, x1 - x0, row_tips(row_above_bar), join);
-            // (no row: the toolbar's edges stay round)
-            let join = if row.is_some() { join } else { Join::None };
             let room = if row.is_some() {
                 toolbar::ROW_ROOM
             } else {
@@ -397,19 +395,11 @@ fn row_above(bar_y: f32, bar_h: f32, room: f32, screen_h: f32) -> bool {
     bar_y + bar_h + room > screen_h
 }
 
-/// The toolbar's edge the row is attached to (the row's own is the opposite one).
-fn join_of(row_above_bar: bool) -> Join {
-    match row_above_bar {
-        true => Join::Above,
-        false => Join::Below,
-    }
-}
-
 /// The row's top: under the toolbar, or above it.
 fn row_y(bar_y: f32, bar_h: f32, above: bool) -> f32 {
     match above {
-        false => bar_y + bar_h + toolbar::ROW_GAP - toolbar::JOIN_OVERLAP,
-        true => bar_y - toolbar::ROW_GAP - toolbar::ROW_H + toolbar::JOIN_OVERLAP,
+        false => bar_y + bar_h + toolbar::ROW_GAP,
+        true => bar_y - toolbar::ROW_GAP - toolbar::ROW_H,
     }
 }
 
@@ -592,23 +582,76 @@ mod tests {
         assert!(failed.is_empty(), "{failed:#?}");
     }
 
-    /// Owner 2026-11-27: the toolbar and its row are one piece, in both directions: the joined edge of
-    /// each tray is nearly square, the far edges stay round.
+    /// Owner 2026-11-28: the options row is its own widget with a clear gap from the toolbar. Measured
+    /// in rendered pixels, row under and above the toolbar, at every scale a window runs at: the rows
+    /// of the window showing through between the two widgets are `ROW_GAP` logical px (scaled; the
+    /// rims' soft edges give or take 2 px) where they used to touch.
     #[test]
-    fn the_row_is_joined_to_the_toolbar_below_and_above() {
-        use crate::shared::kit::surface::Join;
-        assert_eq!(
-            join_of(false),
-            Join::Below,
-            "row under: the toolbar's bottom edge"
-        );
-        assert_eq!(
-            join_of(true),
-            Join::Above,
-            "row over: the toolbar's top edge"
-        );
-        assert_eq!(join_of(false).facing(), Join::Above, "the row's top edge");
-        assert_eq!(join_of(true).facing(), Join::Below, "the row's bottom edge");
+    fn rowgap_1_the_gap_between_toolbar_and_row_is_the_token_at_every_scale() {
+        use crate::shared::kit::testing::shot;
+        let screen = Size::new(1600.0, 420.0);
+        for above in [false, true] {
+            for scale in [1.0_f32, 1.25, 1.5, 1.75, 2.0] {
+                let mut e = SnipToolbar::fitted(crop(300, 200), screen, 1.0);
+                e.annotator
+                    .update(annotate::Message::Tool(annotate::Tool::Rect));
+                let bar = e.bar_size();
+                let y = if above { 340.0 } else { 100.0 };
+                let at = Point::new(((screen.width - bar.width) / 2.0).round(), y);
+                assert_eq!(
+                    row_above(at.y, bar.height, toolbar::ROW_ROOM, screen.height),
+                    above
+                );
+                let draw = |with: bool| {
+                    shot::redrawn(
+                        |i| {
+                            (i == 0).then(|| {
+                                e.view(
+                                    screen,
+                                    with.then_some(at),
+                                    canvas::ScreenMap::ONE,
+                                    |m| m,
+                                    annotate::Message::Grab,
+                                )
+                            })
+                        },
+                        screen,
+                        scale,
+                    )
+                    .1
+                };
+                let (with, without) = (draw(true), draw(false));
+                let w = (screen.width * scale) as usize;
+                let x = w / 2 + 3;
+                let same = |y: usize| {
+                    let i = (y * w + x) * 4;
+                    with[i..i + 4] == without[i..i + 4]
+                };
+                // the middle of the gap, then the run of window rows round it
+                let mid = match above {
+                    false => at.y + bar.height + toolbar::ROW_GAP / 2.0,
+                    true => at.y - toolbar::ROW_GAP / 2.0,
+                };
+                let mid = (mid * scale) as usize;
+                assert!(
+                    same(mid),
+                    "above {above} scale {scale}: gap middle is covered"
+                );
+                let (mut a, mut b) = (mid, mid);
+                while same(a - 1) {
+                    a -= 1;
+                }
+                while same(b + 1) {
+                    b += 1;
+                }
+                let gap = (b - a + 1) as f32;
+                let want = toolbar::ROW_GAP * scale;
+                assert!(
+                    (gap - want).abs() <= 2.0,
+                    "above {above} scale {scale}: {gap} px between the widgets, want {want}"
+                );
+            }
+        }
     }
 
     /// W107 fix 2: the row goes ABOVE the toolbar when the toolbar is near the screen's bottom (the row's
@@ -620,11 +663,8 @@ mod tests {
         let bar_h = toolbar::size().height;
         assert!(!row_above(300.0, bar_h, room, 720.0));
         assert!(row_above(720.0 - bar_h - 4.0, bar_h, room, 720.0));
-        assert_eq!(
-            row_y(300.0, bar_h, false),
-            300.0 + bar_h - toolbar::JOIN_OVERLAP
-        );
-        assert!(row_y(600.0, bar_h, true) + toolbar::ROW_H <= 600.0 + toolbar::JOIN_OVERLAP);
+        assert_eq!(row_y(300.0, bar_h, false), 300.0 + bar_h + toolbar::ROW_GAP);
+        assert!(row_y(600.0, bar_h, true) + toolbar::ROW_H <= 600.0 - toolbar::ROW_GAP);
         // the tooltips go to the other side of the row; with no row, where they were
         assert_eq!(toolbar_tips(true, false, Bottom), Top);
         assert_eq!(toolbar_tips(true, true, Top), Bottom);
@@ -666,7 +706,7 @@ mod tests {
         assert!(zoom < 0.2, "{zoom}");
         assert!((at.x + 780.0 * zoom / 2.0 - 960.0).abs() < 1e-3);
         assert!(
-            at.y >= GAP
+            at.y >= GAP - 1e-3
                 && at.y + 6000.0 * zoom + GAP + bar.height <= screen.height - BOTTOM_GAP + 1e-3
         );
         // Small: never enlarged past its on-screen size (150 % → zoom 1 / 1.5).

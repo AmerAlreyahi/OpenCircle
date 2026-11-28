@@ -339,7 +339,8 @@
         {
           "id": "R-14",
           "title": "Right-click menus v2b: Snip picked area (with R-11), recording corner thumbnail, translated text + translate pill, AI chat (selected answer text, a message, a picture chip, the composer); study docs/internal/reports-enh/w115-right-click-study.md",
-          "status": "todo"
+          "status": "moved",
+          "note": "Moved to 0.7.0 by the owner 2026-11-28."
         },
         {
           "id": "R-17",
@@ -392,6 +393,16 @@
           "depends": [
             "L-10"
           ]
+        },
+        {
+          "id": "R-14",
+          "title": "Right-click menus v2b (moved from 0.6.0)",
+          "status": "todo"
+        },
+        {
+          "id": "T-02",
+          "title": "More tips: one per main feature, saying what it can do beyond the obvious (moved from 0.6.0)",
+          "status": "todo"
         }
       ],
       "gate": [

@@ -1993,42 +1993,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   when idle/off); file search defaults to the no-admin crawl + change watching; the admin "fast search" (NTFS MFT/USN service, or
   Everything when present) is a later opt-in. Research: docs/internal/reports-070/l11-research.md.
 
-- R-06 blur zones built (2026-11-27); the Hide group in the R1 bar's list and the zone outline look are APPROVED by the owner (2026-11-28,
-  sheet .claude/artifacts/v060/r06/hide-group-and-outline-sheet.png). Behaviour: zones are hidden in every frame before the encoder (`record::zones`, Snip's secure Soft Hide); "Hide an app" follows the
+- R-06 blur zones built (2026-11-27); the Hide group in the R1 bar's list and the zone outline look are PENDING the owner's OK (no approved
+  design). Behaviour: zones are hidden in every frame before the encoder (`record::zones`, Snip's secure Soft Hide); "Hide an app" follows the
   app's main window only (dialogs and menus are not covered); Linux shows no outline while recording (it would be filmed), Windows keeps it;
   native Wayland shows no outlines at all.
-
-- Recording widgets NOT accepted yet (owner, 2026-11-28, on dev c2391a8; shots docs/internal/owner-shots/2026-11-28/rec-*.png): video
-  works but NO mic and NO PC sound in video or audio-only recordings ("not accepted"). The record bar and the result widgets (video
-  thumbnail, audio chip) need a UX study and a redesign in the NEW widgets style E (not the old look): more controls (mute PC sound,
-  mic, levels...), draggable, a Play button (audio and video), a clear and stable save behaviour (where it is saved, whether it is
-  saved from the start), "a real advanced recording tool". Study first (Windows + Linux tools), design round with PNGs, then build.
-
-- Owner test of dev c2391a8 (2026-11-28):
-  - Snip toolbar and options row: SUPERSEDES "attached as one piece" (2026-11-25/27): the toolbar stays as it is today, but there
-    must be a clear GAP between the toolbar (upper) and the options row (lower): two separate floating widgets, not attached.
-  - Recording (video and audio-only): the whole flow needs UX work before publishing. No mic sound although Windows' desktop-app
-    microphone access is ON and lists OpenCircle (so the bug is ours); the bar's mic picker shows devices but does not work.
-  - Esc must NOT stop or ask anything while recording (Esc in another app is not for us). Stop is the record key, the bar's Stop, or
-    the tray.
-  - Hide zones: use the user's default Hide/blur style, and a zone must be movable / resizable after it is drawn, before Record starts.
-  - Tips: add more, one per main feature, saying what it can do beyond the obvious (e.g. recording -> "you can hide an area or an app").
-  - The browser page after the OpenRouter sign-in ("OpenCircle is connected. You can close this tab.") must look prettier
-    (OpenCircle's look).
-  - Approved: Snip right-click menu, Hide-zone result, AI chat / Snip More / Studio background looks.
-
-- About page (owner, 2026-11-28): variant A of .claude/artifacts/v060/about/ (COARCH-polished, same order as today); the developer
-  card shows the role "AI & PPM Solution Architect" only, no extra description line (lead recommendation, owner asked); the owner's
-  current GitHub avatar (refreshed); "Something not working?" stays in the Settings sidebar only (not on About).
-- What can I do? card, LATER (owner, 2026-11-28): clicking a main feature shows its sub-features (e.g. Recording -> Hide an area / an
-  app, audio only...), same design logic, built to scale as tips grow. Not in 0.6.0.
-- Recording decisions (owner, 2026-11-28, on the U-01 study docs/internal/reports-060/u01-recording-ux.md):
-  1. Save on Stop: a recording is saved at once (Settings switch to turn it off) and a fast "Saved" notice with the location shows,
-     like Snip's; one-click Delete for bad takes.
-  2. Folders: the OS default folders by kind: videos -> Videos/OpenCircle, audio -> Music/OpenCircle (the OS audio folder),
-     pictures -> Pictures/OpenCircle; changeable in Settings.
-  3. Play: video opens in the system's player for now; audio plays inside the widget; later a SIMPLE trimmer only (Studio).
-  4. The bar: fps / cursor / countdown behind the size/fps label; Hide area / Hide app are main buttons on the bar (not inside the mic
-     picker); mic and PC sound are their own buttons with live meters.
-  5. PC sound off by default (remembered once turned on). When the mic is blocked or silent, OpenCircle says so and tells where to
-     grant access (a button opening the OS privacy setting).

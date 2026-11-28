@@ -807,11 +807,9 @@ fn sizes<'a>(
 /// The slider's room beside the presets.
 const SLIDER_W: f32 = size::PANEL - 2.0 * space::PANEL - 102.0 - SPACING;
 
-/// The row under the toolbar (UX C4): its room, and the gap above it.
-/// Attached directly under (or above) the Snip toolbar as one piece (owner, 2026-11-26).
-pub const ROW_GAP: f32 = 0.0;
-/// The row covers this much of the toolbar's edge so the two rims make one line.
-pub const JOIN_OVERLAP: f32 = 1.0;
+/// The row under the toolbar (UX C4): its room, and the gap between them. Two separate floating
+/// widgets with a clear gap, the same above and below (owner, 2026-11-28; supersedes "attached").
+pub const ROW_GAP: f32 = widget_e::WIDGET_GAP;
 /// The row's side padding (the design's `.orow`: 10 px + the rim).
 const ROW_PAD_X: f32 = 11.0;
 pub const ROW_H: f32 = crate::shared::kit::option_bar::HEIGHT + 2.0 * widget_e::TRAY_PAD_Y;
@@ -2122,11 +2120,12 @@ mod tests {
     }
 
     #[test]
-    fn style_e_toolbar_and_attached_row_use_two_tone_segments() {
+    fn style_e_toolbar_and_row_use_two_tone_segments() {
         use crate::shared::kit::testing::shot;
         assert_eq!(
-            ROW_GAP, 0.0,
-            "options row stays attached directly under toolbar"
+            ROW_GAP,
+            widget_e::WIDGET_GAP,
+            "options row is its own widget, a clear gap under the toolbar"
         );
         let mut e = editor();
         e.update(Message::Tool(Tool::Rect));

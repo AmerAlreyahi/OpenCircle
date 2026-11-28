@@ -933,6 +933,14 @@ strings! {
         | "استخدام مزوّدي ومفتاحي";
     signin_page: "OpenCircle is connected. You can close this tab."
         | "تم ربط OpenCircle. يمكنك إغلاق هذا التبويب.";
+    signin_ok_title: "You’re connected"
+        | "تم الربط";
+    signin_cancel_title: "Sign-in cancelled"
+        | "أُلغي تسجيل الدخول";
+    signin_cancel_line: "Nothing was saved. You can close this tab."
+        | "لم يُحفظ شيء. يمكنك إغلاق هذا التبويب.";
+    signin_fail_line: "Go back to OpenCircle and try again. You can close this tab."
+        | "ارجع إلى OpenCircle وحاول مرة أخرى. يمكنك إغلاق هذا التبويب.";
     signin_mismatch: "The sign-in answer didn't match. Try again."
         | "لم يتطابق رد تسجيل الدخول. حاول مرة أخرى.";
     signin_denied: "OpenRouter didn't give access. Try again."
