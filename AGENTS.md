@@ -2016,3 +2016,19 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   - The browser page after the OpenRouter sign-in ("OpenCircle is connected. You can close this tab.") must look prettier
     (OpenCircle's look).
   - Approved: Snip right-click menu, Hide-zone result, AI chat / Snip More / Studio background looks.
+
+- About page (owner, 2026-11-28): variant A of .claude/artifacts/v060/about/ (COARCH-polished, same order as today); the developer
+  card shows the role "AI & PPM Solution Architect" only, no extra description line (lead recommendation, owner asked); the owner's
+  current GitHub avatar (refreshed); "Something not working?" stays in the Settings sidebar only (not on About).
+- What can I do? card, LATER (owner, 2026-11-28): clicking a main feature shows its sub-features (e.g. Recording -> Hide an area / an
+  app, audio only...), same design logic, built to scale as tips grow. Not in 0.6.0.
+- Recording decisions (owner, 2026-11-28, on the U-01 study docs/internal/reports-060/u01-recording-ux.md):
+  1. Save on Stop: a recording is saved at once (Settings switch to turn it off) and a fast "Saved" notice with the location shows,
+     like Snip's; one-click Delete for bad takes.
+  2. Folders: the OS default folders by kind: videos -> Videos/OpenCircle, audio -> Music/OpenCircle (the OS audio folder),
+     pictures -> Pictures/OpenCircle; changeable in Settings.
+  3. Play: video opens in the system's player for now; audio plays inside the widget; later a SIMPLE trimmer only (Studio).
+  4. The bar: fps / cursor / countdown behind the size/fps label; Hide area / Hide app are main buttons on the bar (not inside the mic
+     picker); mic and PC sound are their own buttons with live meters.
+  5. PC sound off by default (remembered once turned on). When the mic is blocked or silent, OpenCircle says so and tells where to
+     grant access (a button opening the OS privacy setting).
