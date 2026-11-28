@@ -2000,3 +2000,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
 
 - Recording sound VERIFIED by the owner (2026-11-28, dev 5b30e5a on his Windows PC): PC sound and the microphone are both captured
   (R-04c: 24-bit and other WASAPI formats, live mic switch). The recording UX redesign (U-02/U-03) is still to come.
+
+- v0.6.0 release scope (owner, 2026-11-28, "only for this time"): publish after a docs update only; the full clean-up pass is skipped
+  for this release (CI, the update gate and the signed assets still run). The recording look fixes (U-03) go to a Sonnet builder
+  while Antigravity is out of quota.
