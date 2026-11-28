@@ -403,6 +403,16 @@
           "id": "T-02",
           "title": "More tips: one per main feature, saying what it can do beyond the obvious (moved from 0.6.0)",
           "status": "todo"
+        },
+        {
+          "id": "O-01",
+          "title": "Lab: OCRia-nano-1 (LlamaIndex, 8.1M params, ONNX) vs PP-OCRv5 on our corpus (Arabic, mixed, games, UI); check the modified Open RAIL-M licence first; adopt only on a measured leap (owner 2026-11-28)",
+          "status": "todo"
+        },
+        {
+          "id": "O-02",
+          "title": "Study: Yogurt (FrigadeHQ, MIT; local meeting notes: mic + system audio, call detection for Zoom/Teams/Meet, local transcribe + summarize, Markdown, MCP) as the reference for the meeting captions extension (L-09); MIT code reusable with notice (owner 2026-11-28)",
+          "status": "todo"
         }
       ],
       "gate": [
