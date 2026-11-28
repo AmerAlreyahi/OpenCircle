@@ -1997,3 +1997,22 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   sheet .claude/artifacts/v060/r06/hide-group-and-outline-sheet.png). Behaviour: zones are hidden in every frame before the encoder (`record::zones`, Snip's secure Soft Hide); "Hide an app" follows the
   app's main window only (dialogs and menus are not covered); Linux shows no outline while recording (it would be filmed), Windows keeps it;
   native Wayland shows no outlines at all.
+
+- Recording widgets NOT accepted yet (owner, 2026-11-28, on dev c2391a8; shots docs/internal/owner-shots/2026-11-28/rec-*.png): video
+  works but NO mic and NO PC sound in video or audio-only recordings ("not accepted"). The record bar and the result widgets (video
+  thumbnail, audio chip) need a UX study and a redesign in the NEW widgets style E (not the old look): more controls (mute PC sound,
+  mic, levels...), draggable, a Play button (audio and video), a clear and stable save behaviour (where it is saved, whether it is
+  saved from the start), "a real advanced recording tool". Study first (Windows + Linux tools), design round with PNGs, then build.
+
+- Owner test of dev c2391a8 (2026-11-28):
+  - Snip toolbar and options row: SUPERSEDES "attached as one piece" (2026-11-25/27): the toolbar stays as it is today, but there
+    must be a clear GAP between the toolbar (upper) and the options row (lower): two separate floating widgets, not attached.
+  - Recording (video and audio-only): the whole flow needs UX work before publishing. No mic sound although Windows' desktop-app
+    microphone access is ON and lists OpenCircle (so the bug is ours); the bar's mic picker shows devices but does not work.
+  - Esc must NOT stop or ask anything while recording (Esc in another app is not for us). Stop is the record key, the bar's Stop, or
+    the tray.
+  - Hide zones: use the user's default Hide/blur style, and a zone must be movable / resizable after it is drawn, before Record starts.
+  - Tips: add more, one per main feature, saying what it can do beyond the obvious (e.g. recording -> "you can hide an area or an app").
+  - The browser page after the OpenRouter sign-in ("OpenCircle is connected. You can close this tab.") must look prettier
+    (OpenCircle's look).
+  - Approved: Snip right-click menu, Hide-zone result, AI chat / Snip More / Studio background looks.
