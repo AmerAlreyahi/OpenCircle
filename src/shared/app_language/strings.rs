@@ -637,8 +637,10 @@ strings! {
         | "رخصة MIT";
     // English: the bio of assets/about/profile.toml ({}); Arabic: the draft
     // (the owner corrects it). The name stays as the profile writes it.
+    ab_dev_name: "Amer Alreyahi"
+        | "عامر زهير الرياحي";
     ab_bio: "{}"
-        | "مهندس حلول في الذكاء الاصطناعي وإدارة المحافظ والمشاريع، يبني أدوات سطح مكتب سريعة تحترم الخصوصية.";
+        | "مهندس حلول في الذكاء الاصطناعي وإدارة المحافظ والمشاريع";
     ab_profile: "GitHub profile"
         | "الملف على GitHub";
     ab_star: "Star OpenCircle"

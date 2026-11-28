@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 user=AmerAlreyahi
 out=assets/about/profile.toml
-bio="AI and PPM solution architect building fast, private desktop tools."
+bio="AI & PPM Solution Architect"
 if [ -f "$out" ]; then
   old=$(sed -n 's/^bio = "\(.*\)"$/\1/p' "$out")
   [ -n "$old" ] && bio=$old

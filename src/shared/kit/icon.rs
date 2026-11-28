@@ -110,11 +110,12 @@ pub enum Icon {
     Plus,
     /// lucide "focus" (Circle to Search: brackets round a small square).
     Focus,
+    Globe,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 56] = [
+    pub const ALL: [Icon; 57] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -171,6 +172,7 @@ impl Icon {
         Icon::Waveform,
         Icon::Plus,
         Icon::Focus,
+        Icon::Globe,
     ];
 
     /// A directional icon as the layout direction reads it: Back and Forward
@@ -241,6 +243,7 @@ impl Icon {
             Icon::Video => '\u{e1a4}',
             Icon::Waveform => '\u{e55e}',
             Icon::Plus => '\u{e140}',
+            Icon::Globe => '\u{e0eb}',
         }
     }
 }

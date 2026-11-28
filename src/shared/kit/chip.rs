@@ -533,3 +533,77 @@ pub fn info<'a, Message: 'a>(
         .padding([4, 10])
         .into()
 }
+
+/// A clickable icon link chip (About page variant A): 26 px tall, 8 px
+/// corners, leading 13 px icon, 12 px Medium label, trailing External icon
+/// (11 px), on hover tint with divider border (elevated on hover).
+pub fn link<'a, Message: Clone + 'a>(
+    leading: super::icon::Icon,
+    label: &'a str,
+    on_press: Message,
+) -> Element<'a, Message> {
+    use iced::widget::button as iced_button;
+    let body = super::dir::row(vec![
+        super::icon::icon(leading, 13.0)
+            .color(c().text_muted)
+            .into(),
+        text(label)
+            .size(12.0)
+            .font(weight(Weight::Medium))
+            .wrapping(iced::widget::text::Wrapping::None)
+            .color(c().text)
+            .into(),
+        super::icon::icon(super::icon::Icon::External, 11.0)
+            .color(c().text_muted)
+            .into(),
+    ])
+    .spacing(space::GAP)
+    .align_y(Center);
+    let b = iced_button(container(body).center_y(26.0))
+        .height(26.0)
+        .padding([0.0, 10.0])
+        .style(|_, status| {
+            let hot = matches!(
+                status,
+                iced_button::Status::Hovered | iced_button::Status::Pressed
+            );
+            iced_button::Style {
+                background: Some(if hot { c().elevated } else { c().hover }.into()),
+                text_color: c().text,
+                border: Border::default()
+                    .rounded(radius::MENU)
+                    .width(1)
+                    .color(if hot {
+                        c().elevated_border
+                    } else {
+                        c().divider
+                    }),
+                ..iced_button::Style::default()
+            }
+        });
+    super::focus::press(b, radius::MENU, Some(on_press)).into()
+}
+
+/// A circular avatar with a 2 px card-colour gap and an accent ring (About
+/// page variant A). Expects a pre-masked round image so corners stay clear on
+/// the CPU renderer.
+pub fn avatar_ring<'a, Message: 'a>(
+    handle: iced::widget::image::Handle,
+    diameter: f32,
+) -> Element<'a, Message> {
+    let photo = iced::widget::image(handle)
+        .width(diameter)
+        .height(diameter)
+        .content_fit(iced::ContentFit::Cover)
+        .border_radius(radius::FULL);
+    container(photo)
+        .padding(2.0)
+        .style(|_| container::Style {
+            border: Border::default()
+                .rounded(radius::FULL)
+                .width(2.0)
+                .color(c().accent),
+            ..container::Style::default()
+        })
+        .into()
+}

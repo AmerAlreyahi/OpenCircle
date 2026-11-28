@@ -25,7 +25,7 @@ use crate::shared::kit::icon::{Icon, icon};
 use crate::shared::kit::logo::logo;
 use crate::shared::kit::logo::try_decode;
 use crate::shared::kit::surface::{Material, surface};
-use crate::shared::kit::text::{accent, paragraph, sub, text};
+use crate::shared::kit::text::{paragraph, sub, text};
 use crate::shared::kit::tokens::{Role, radius, space};
 use crate::shared::kit::tooltip::{Why, hint};
 
@@ -141,23 +141,24 @@ pub fn credit_url(c: &Credit) -> String {
 }
 
 /// Between the cards; inside a card; between a tile and its text.
-const CARD_GAP: f32 = 14.0;
-const TILE_GAP: f32 = 14.0;
-/// Between two links, two buttons, a link's words and its icon.
-const LINK_GAP: f32 = 16.0;
+const CARD_GAP: f32 = 12.0;
+const TILE_GAP: f32 = 16.0;
+/// Between two link chips, two buttons, a link's words and its icon.
+const LINK_GAP: f32 = 6.0;
 const BUTTON_GAP: f32 = 8.0;
 const ICON_GAP: f32 = 4.0;
 const LINK_ICON: f32 = 12.0;
-/// A "Made by others" row's padding (above and below).
-const LIST_PAD: f32 = 5.0;
-/// The logo and avatar tiles, and their inner pad.
-const TILE: f32 = 52.0;
+/// A "Made by others" row's padding (above and below), tighter per variant A.
+const LIST_PAD: f32 = 3.5;
+/// The logo tile and circular avatar diameter (variant A: 60 px).
+const TILE: f32 = 60.0;
 const TILE_PAD: f32 = 5.0;
-/// A licence chip's font size (`chip::pill`'s mono) and its side pads.
+/// Lucide globe glyph (already in assets/lucide/lucide-subset.ttf).
+/// A licence chip's font size (chip::pill mono) and its side pads.
 const CHIP_FONT: f32 = 11.0;
 const CHIP_PADS: f32 = 2.0 * 8.0 + 4.0;
 
-/// The developer card's data: `assets/about/profile.toml`.
+/// The developer card's data: assets/about/profile.toml.
 #[derive(Debug, Deserialize)]
 pub struct Profile {
     pub name: String,
@@ -174,21 +175,55 @@ pub fn profile() -> &'static Profile {
                 name: "Amer Alreyahi".into(),
                 login: "AmerAlreyahi".into(),
                 website: PROFILE_URL.into(),
-                bio: "Building fast, private desktop tools.".into(),
+                bio: "AI & PPM Solution Architect".into(),
             }
         })
     });
     &PROFILE
 }
 
-/// The avatar is fetched at release time (`scripts/refresh-about.sh`), so it is not a trusted
-/// asset: sniff the content (GitHub serves JPEG today), never trust the `.png` name.
-fn decode_avatar(bytes: &[u8]) -> Option<Handle> {
-    if let Some((w, h, rgba)) = try_decode(bytes) {
-        return Some(Handle::from_rgba(w, h, rgba));
+/// Center-crop to a square and apply a smooth circular alpha mask so the
+/// avatar draws round even on renderers that ignore image::border_radius.
+fn mask_circle(w: u32, h: u32, rgba: &[u8]) -> (u32, u32, Vec<u8>) {
+    let side = w.min(h);
+    if side == 0 {
+        return (w, h, rgba.to_vec());
     }
-    let img = ::image::load_from_memory(bytes).ok()?.to_rgba8();
-    Some(Handle::from_rgba(img.width(), img.height(), img.into_raw()))
+    let ox = (w - side) / 2;
+    let oy = (h - side) / 2;
+    let half = (side as f32) * 0.5;
+    let mut out = vec![0u8; (side as usize) * (side as usize) * 4];
+    for y in 0..side {
+        let dy = (y as f32) + 0.5 - half;
+        for x in 0..side {
+            let dx = (x as f32) + 0.5 - half;
+            let dist = (dx * dx + dy * dy).sqrt();
+            let cov = (half - dist).clamp(0.0, 1.0);
+            if cov <= 0.0 {
+                continue;
+            }
+            let si = (((y + oy) as usize) * (w as usize) + ((x + ox) as usize)) * 4;
+            let di = ((y as usize) * (side as usize) + (x as usize)) * 4;
+            out[di] = rgba[si];
+            out[di + 1] = rgba[si + 1];
+            out[di + 2] = rgba[si + 2];
+            out[di + 3] = ((rgba[si + 3] as f32) * cov).round() as u8;
+        }
+    }
+    (side, side, out)
+}
+
+/// The avatar is fetched at release time (scripts/refresh-about.sh), so it is not a trusted
+/// asset: sniff the content (GitHub serves JPEG today), never trust the .png name.
+fn decode_avatar(bytes: &[u8]) -> Option<Handle> {
+    let (w, h, rgba) = if let Some(raw) = try_decode(bytes) {
+        raw
+    } else {
+        let img = ::image::load_from_memory(bytes).ok()?.to_rgba8();
+        (img.width(), img.height(), img.into_raw())
+    };
+    let (sw, sh, round) = mask_circle(w, h, &rgba);
+    Some(Handle::from_rgba(sw, sh, round))
 }
 
 fn avatar() -> Handle {
@@ -209,13 +244,12 @@ fn tile<'a>(handle: Handle) -> Element<'a, Message> {
         .height(inner)
         .content_fit(ContentFit::Cover)
         .border_radius(radius::CARD);
-    surface(Material::Recessed, radius::WINDOW, picture)
+    surface(Material::Recessed, radius::DROPDOWN, picture)
         .padding(TILE_PAD)
         .into()
 }
 
-/// A quiet link (the kit's link look: secondary text, brighter under the
-/// cursor) with the external-link icon after its words.
+/// A quiet link with the external-link icon after its words (used for "All licences").
 fn link<'a>(name: &'a str, url: impl Into<String>) -> Element<'a, Message> {
     let words = dir_row![label(name), icon(Icon::External, LINK_ICON)]
         .spacing(ICON_GAP)
@@ -223,7 +257,12 @@ fn link<'a>(name: &'a str, url: impl Into<String>) -> Element<'a, Message> {
     button(words, Kind::Quiet, Some(Message::OpenLink(url.into())))
 }
 
-/// A card's links in one row, `LINK_GAP` apart, at the start edge.
+/// A clickable icon link chip (variant A).
+fn link_chip<'a>(leading: Icon, name: &'a str, url: impl Into<String>) -> Element<'a, Message> {
+    crate::shared::kit::chip::link(leading, name, Message::OpenLink(url.into()))
+}
+
+/// A card's links in one row, LINK_GAP apart, at the start edge.
 fn links<'a>(all: Vec<Element<'a, Message>>) -> Element<'a, Message> {
     dir::row(all).spacing(LINK_GAP).align_y(Center).into()
 }
@@ -241,7 +280,10 @@ pub fn view(state: &State) -> Element<'_, Message> {
     // the search finds the cards' words and every credit, shown or folded
     let p = profile();
     crate::shared::kit::setting_row::indexed("OpenCircle", t!(ab_what));
-    crate::shared::kit::setting_row::indexed(&p.name, &p.bio);
+    crate::shared::kit::setting_row::indexed(
+        if dir::rtl() { t!(ab_dev_name) } else { &p.name },
+        &fmt(S::ab_bio, &[&p.bio]),
+    );
     crate::shared::kit::setting_row::indexed(t!(ab_others), t!(ab_others_desc));
     for (what, by, licence) in made_by() {
         crate::shared::kit::setting_row::indexed(what, &format!("{by} {licence}"));
@@ -256,7 +298,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         .into()
 }
 
-/// Logo, name and version, one line of what it is, and its links.
+/// Logo, name and version, one line of what it is, and its link chips.
 fn app<'a>() -> Element<'a, Message> {
     let name = dir_row![
         text(Role::APP_NAME, "OpenCircle"),
@@ -265,9 +307,9 @@ fn app<'a>() -> Element<'a, Message> {
     .spacing(BUTTON_GAP)
     .align_y(Center);
     let links = links(vec![
-        link(t!(ab_github), PROJECT),
-        link(t!(ab_website), WEBSITE),
-        link(t!(ab_licence), LICENSE),
+        link_chip(Icon::CircleArrowOut, t!(ab_github), PROJECT),
+        link_chip(Icon::Globe, t!(ab_website), WEBSITE),
+        link_chip(Icon::Shield, t!(ab_licence), LICENSE),
     ]);
     let mark = logo((TILE - 2.0 * TILE_PAD) as u32);
     headed(
@@ -276,36 +318,27 @@ fn app<'a>() -> Element<'a, Message> {
     )
 }
 
-/// The developer: avatar, name, handle, bio, and their links.
+/// The developer: ringed circular avatar, name, handle chip, role only, and link chips.
 fn developer<'a>() -> Element<'a, Message> {
     let p = profile();
-    let name = dir_row![
-        text(Role::ROW_TITLE, p.name.as_str()),
-        accent(Role::KEYCAP, format!("@{}", p.login)),
-    ]
-    .spacing(BUTTON_GAP)
-    .align_y(Center);
-    let star = button(
-        dir_row![icon(Icon::Star, LINK_ICON), label(t!(ab_star))]
-            .spacing(ICON_GAP)
-            .align_y(Center),
-        Kind::Quiet,
-        Some(Message::OpenLink(PROJECT.into())),
-    );
+    let dev = if dir::rtl() {
+        t!(ab_dev_name)
+    } else {
+        p.name.as_str()
+    };
+    let name = dir_row![text(Role::ROW_TITLE, dev), chip(format!("@{}", p.login)),]
+        .spacing(BUTTON_GAP)
+        .align_y(Center);
     let links = links(vec![
-        link(t!(ab_profile), PROFILE_URL),
-        star,
-        link(t!(ab_website), p.website.clone()),
+        link_chip(Icon::CircleArrowOut, t!(ab_profile), PROFILE_URL),
+        link_chip(Icon::Star, t!(ab_star), PROJECT),
+        link_chip(Icon::Globe, t!(ab_website), p.website.clone()),
     ]);
-    // the profile's bio in English; the table's Arabic draft in Arabic
-    let bio = paragraph(sub(Role::NOTE, fmt(S::ab_bio, &[&p.bio])));
-    // the photo fills its own frame as a circle: no tile or margin behind it
-    let photo = image(avatar())
-        .width(TILE)
-        .height(TILE)
-        .content_fit(ContentFit::Cover)
-        .border_radius(radius::FULL);
-    headed(photo.into(), column![name, bio, links])
+    let role = paragraph(sub(Role::NOTE, fmt(S::ab_bio, &[&p.bio])));
+    headed(
+        crate::shared::kit::chip::avatar_ring(avatar(), TILE),
+        column![name, role, links],
+    )
 }
 
 /// Who made what we ship: one row each (what and its maker, the licence in
@@ -587,5 +620,84 @@ mod tests {
         let tourism = line("tourism-snip-long");
         assert!(tourism.contains("Bastian Herre") && tourism.contains("Veronika Samborska"));
         assert!(line("solar-photovoltaic-panel-prices-ai-chat-ai-browser").contains("IRENA"));
+    }
+
+    /// A-01: the developer card shows the role only (no side-project line),
+    /// the Arabic name in Arabic, and no Something-not-working card on About.
+    #[test]
+    fn a01_dev_card_shows_role_no_side_project_and_no_trouble_card() {
+        use crate::shared::app_language::{self, Lang};
+        use crate::shared::kit::testing::shot;
+        app_language::set(Lang::En);
+        let en = shot::texts(developer());
+        assert!(en.iter().any(|t| t == "Amer Alreyahi"), "{en:?}");
+        assert!(en.iter().any(|t| t == "@AmerAlreyahi"), "{en:?}");
+        assert!(
+            en.iter().any(|t| t == "AI & PPM Solution Architect"),
+            "{en:?}"
+        );
+        assert!(
+            !en.iter()
+                .any(|t| t.contains("side project") || t.contains("building fast")),
+            "{en:?}"
+        );
+        assert!(!en.iter().any(|t| t == "Something not working?"), "{en:?}");
+
+        app_language::set(Lang::Ar);
+        let ar = shot::texts(developer());
+        assert!(ar.iter().any(|t| t.contains("عامر زهير الرياحي")), "{ar:?}");
+        assert!(ar.iter().any(|t| t == "@AmerAlreyahi"), "{ar:?}");
+        assert!(
+            ar.iter()
+                .any(|t| t.contains("مهندس حلول في الذكاء الاصطناعي وإدارة المحافظ والمشاريع")),
+            "{ar:?}"
+        );
+        assert!(
+            !ar.iter()
+                .any(|t| t.contains("مشروع جانبي") || t.contains("يبني أدوات")),
+            "{ar:?}"
+        );
+        app_language::set(Lang::En);
+    }
+
+    /// A-01: the avatar is pre-masked round so its corner pixel draws as the
+    /// card background even on the CPU renderer.
+    #[test]
+    fn a01_avatar_draws_round_with_card_background_corners() {
+        use crate::shared::kit::testing::shot;
+        use crate::shared::kit::themes::{self, SAPPHIRE};
+        // Direct mask check: solid red 60x60 -> corner alpha 0, center alpha 255.
+        let mut red = vec![0u8; 60 * 60 * 4];
+        for px in red.as_chunks_mut::<4>().0 {
+            *px = [220, 30, 30, 255];
+        }
+        let (w, h, round) = mask_circle(60, 60, &red);
+        assert_eq!((w, h), (60, 60));
+        assert_eq!(round[3], 0, "top-left corner must be transparent");
+        assert_eq!(
+            round[((30 * 60 + 30) * 4) + 3],
+            255,
+            "center must be opaque"
+        );
+
+        // Rendered check on the CPU renderer: corner inside card matches card bg.
+        themes::set(&SAPPHIRE);
+        let img = shot::render(
+            card(crate::shared::kit::chip::avatar_ring::<()>(avatar(), TILE)),
+            96,
+            96,
+        );
+        let px = |x: u32, y: u32| -> [u8; 4] {
+            let i = ((y as usize) * 96 + (x as usize)) * 4;
+            [img[i], img[i + 1], img[i + 2], img[i + 3]]
+        };
+        let bg = px(4, 4);
+        let corner = px(12, 12);
+        let center = px(42, 42);
+        assert_eq!(
+            corner, bg,
+            "avatar corner should be card background, not square photo"
+        );
+        assert_ne!(center, bg, "avatar center should show the photo");
     }
 }
