@@ -1997,3 +1997,6 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   design). Behaviour: zones are hidden in every frame before the encoder (`record::zones`, Snip's secure Soft Hide); "Hide an app" follows the
   app's main window only (dialogs and menus are not covered); Linux shows no outline while recording (it would be filmed), Windows keeps it;
   native Wayland shows no outlines at all.
+
+- Recording sound VERIFIED by the owner (2026-11-28, dev 5b30e5a on his Windows PC): PC sound and the microphone are both captured
+  (R-04c: 24-bit and other WASAPI formats, live mic switch). The recording UX redesign (U-02/U-03) is still to come.
