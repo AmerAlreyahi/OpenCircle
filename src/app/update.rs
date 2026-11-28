@@ -150,8 +150,10 @@ impl App {
             {
                 self.record_key(qa.action == QuickId::RecordAudio, at)
             }
-            // Esc while recording stops and asks Keep / Discard
-            Message::Escape if self.rec.state.is_live() => self.record_esc(),
+            // Esc while recording or paused does nothing (a pick over it still takes its Esc)
+            Message::Escape if self.rec.state.is_live() && self.capturing.is_none() => {
+                self.record_esc()
+            }
             Message::Live(msg) => self.on_live(msg),
             Message::Translate(id, msg) => self.on_translate(id, msg),
             Message::ChatHome(screen) => self.chat_home(screen),

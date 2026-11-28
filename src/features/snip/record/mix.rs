@@ -194,6 +194,15 @@ impl Mixer {
         self.origin = Some(origin);
     }
 
+    /// Enables the microphone track mid-recording (e.g. when a mic is picked after starting without one).
+    pub fn enable_mic(&mut self) {
+        if !self.has_mic {
+            self.has_mic = true;
+            self.mic = Track::new();
+            self.mic.next_frame = self.mixed_frames;
+        }
+    }
+
     /// Mutes or unmutes the microphone track (muted = writes zeros, meter = 0).
     pub fn set_mic_muted(&mut self, muted: bool) {
         self.mic.muted = muted;

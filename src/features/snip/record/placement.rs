@@ -45,8 +45,6 @@ pub enum Row {
     /// Ready: start recording / cancel the pick.
     Record,
     Cancel,
-    /// Esc's question: keep what was recorded (Discard is the row above).
-    Keep,
     /// Error card: what went wrong (notes), then the ways out.
     ErrMic,
     ErrRefused,
@@ -72,7 +70,7 @@ pub struct Ctx {
 impl Row {
     /// Every row (the desktop's menu builds one item for each).
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    pub const ALL: [Row; 16] = [
+    pub const ALL: [Row; 15] = [
         Row::Pause,
         Row::Resume,
         Row::Stop,
@@ -81,7 +79,6 @@ impl Row {
         Row::Device,
         Row::Record,
         Row::Cancel,
-        Row::Keep,
         Row::ErrMic,
         Row::ErrRefused,
         Row::ErrEncoder,
@@ -113,7 +110,6 @@ impl Row {
             Row::Device => ctx.device.clone(),
             Row::Record => crate::t!(rec_record).into(),
             Row::Cancel | Row::Dismiss => crate::t!(rec_cancel).into(),
-            Row::Keep => crate::t!(rec_keep).into(),
             Row::ErrMic => crate::t!(rec_err_mic).into(),
             Row::ErrRefused => crate::t!(rec_err_refused).into(),
             Row::ErrEncoder => crate::t!(rec_err_encoder).into(),
@@ -130,7 +126,6 @@ pub fn tray_rows(state: State) -> Vec<Row> {
         State::Picking | State::Asking | State::Countdown(_) => vec![Row::Record, Row::Cancel],
         State::Recording { .. } => vec![Row::Pause, Row::Stop, Row::Discard, Row::Mic, Row::Device],
         State::Paused { .. } => vec![Row::Resume, Row::Stop, Row::Discard, Row::Mic, Row::Device],
-        State::AskKeep { .. } => vec![Row::Keep, Row::Discard],
         State::Error(Fault::Mic) => vec![Row::ErrMic, Row::Retry, Row::Fix, Row::Dismiss],
         State::Error(Fault::Encoder) => vec![Row::ErrEncoder, Row::Dismiss],
         State::Error(Fault::WriteFailed) => vec![Row::ErrWrite, Row::Dismiss],
@@ -164,11 +159,7 @@ mod tests {
     #[test]
     fn the_tray_menu_rows_follow_the_state() {
         let rec = State::Recording { audio_only: false };
-        let keep = State::AskKeep {
-            audio_only: false,
-            was_paused: false,
-        };
-        let table: [(State, &[Row]); 8] = [
+        let table: [(State, &[Row]); 7] = [
             (
                 rec,
                 &[Row::Pause, Row::Stop, Row::Discard, Row::Mic, Row::Device],
@@ -179,7 +170,6 @@ mod tests {
             ),
             (State::Picking, &[Row::Record, Row::Cancel]),
             (State::Countdown(2), &[Row::Record, Row::Cancel]),
-            (keep, &[Row::Keep, Row::Discard]),
             (
                 State::Error(Fault::Mic),
                 &[Row::ErrMic, Row::Retry, Row::Fix, Row::Dismiss],

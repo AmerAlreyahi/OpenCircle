@@ -68,8 +68,9 @@ pub enum Msg {
     /// The error card's fix (record without a microphone) and Try again.
     Fix,
     Retry,
-    /// The keep card: Keep (Discard is the bin's).
-    Keep,
+    /// The silent-microphone card's buttons: open OS microphone privacy settings, or dismiss.
+    MicSettings,
+    DismissSilent,
     /// A press on the bar's body: the window is dragged.
     Grab,
     /// The Hide group of the list (before Record and while paused): drag an area to hide, pick
@@ -92,8 +93,8 @@ pub struct Bar {
     pub sound: Option<String>,
     pub sound_on: bool,
     pub menu: bool,
-    /// Esc was pressed: the Keep / Discard card hangs under the bar.
-    pub ask: bool,
+    /// True when an unmuted mic is delivering all-zero packets (shows calm notice card).
+    pub mic_silent: bool,
     pub size: (u32, u32),
     pub fps: u32,
     /// Level bars (0..1) of an audio recording.
@@ -120,7 +121,7 @@ impl Bar {
             sound: None,
             sound_on: false,
             menu: false,
-            ask: false,
+            mic_silent: false,
             size: (1920, 1080),
             fps: 30,
             levels: Vec::new(),
@@ -173,7 +174,11 @@ impl Bar {
         }
     }
 
-    /// The window's size: the bar, and the device list or the error card under it.
+    fn shows_silent_card(&self) -> bool {
+        self.mic_silent && !self.menu && matches!(self.phase, Phase::Recording | Phase::Paused)
+    }
+
+    /// The window's size: the bar, and the device list or the error/silent card under it.
     pub fn size(&self) -> Size {
         let under = match (self.menu, self.phase) {
             (true, _) => {
@@ -181,11 +186,12 @@ impl Bar {
                 GAP + option_list::floating_menu_height(items, lines) + HEADING * (lines + 1) as f32
             }
             (false, Phase::Error(_)) => GAP + 150.0,
-            _ if self.ask => GAP + 100.0,
+            _ if self.shows_silent_card() => GAP + 128.0,
             _ => 0.0,
         };
         let width = match (self.menu, self.phase) {
             (_, Phase::Error(_)) => self.bar_width().max(CARD_W),
+            _ if self.shows_silent_card() => self.bar_width().max(CARD_W),
             _ => self.bar_width(),
         };
         Size::new(width, parts::BAR_H + under)
@@ -202,16 +208,14 @@ impl Bar {
         let under = match (self.menu, self.phase) {
             (true, _) => Some(self.devices()),
             (false, Phase::Error(fault)) => Some(self.error(fault)),
+            _ if self.shows_silent_card() => Some(self.silent_mic_card()),
             _ => None,
         };
-        let under = match (self.ask, under) {
-            (true, _) => Some(self.keep_card()),
-            (false, under) => under,
-        };
-        mouse_area(parts::hung(self.bar(corners), under))
+        let bar = mouse_area(self.bar(corners))
             .on_press(Msg::Grab)
             .interaction(mouse::Interaction::Grab)
-            .into()
+            .into();
+        parts::hung(bar, under)
     }
 
     fn bar(&self, corners: f32) -> Element<'_, Msg> {
@@ -397,17 +401,14 @@ impl Bar {
         parts::card_under(CARD_W, card)
     }
 
-    /// Esc while recording: Keep or Discard.
-    fn keep_card(&self) -> Element<'_, Msg> {
+    /// Calm notice when an unmuted microphone delivers continuous all-zero packets.
+    fn silent_mic_card(&self) -> Element<'_, Msg> {
         let card = column![
-            text::text(Role::ROW_TITLE, t!(rec_keep_h)),
-            text::text(
-                Role::ROW_DESC,
-                t!(rec_keep_d).replace("{}", &clock::format(self.elapsed))
-            ),
+            text::text(Role::ROW_TITLE, t!(rec_mic_silent_h)),
+            text::text(Role::ROW_DESC, t!(rec_mic_silent_d)),
             dir::row(vec![
-                regular(t!(rec_keep), false, Some(Msg::Keep)),
-                regular(t!(rec_discard_btn), false, Some(Msg::Discard)),
+                regular(t!(rec_mic_settings), false, Some(Msg::MicSettings)),
+                regular(t!(rec_mic_silent_dismiss), false, Some(Msg::DismissSilent)),
             ])
             .spacing(PAD),
         ]
@@ -643,5 +644,54 @@ mod tests {
                 || crate::shared::kit::recording::zone_outline::<Msg>(8.0),
             ));
         });
+    }
+
+    /// R04C-3: pressing anywhere under the bar (open dropdown or card) never grabs the window,
+    /// and the silent-microphone card grows the window and sends MicSettings / DismissSilent.
+    #[test]
+    fn r04c_3_dropdown_press_does_not_grab_and_silent_card_sends_messages() {
+        let mut open = bar(Phase::Recording, false);
+        open.menu = true;
+        let size = open.size();
+        // Sweep the entire dropdown area below the bar (y > BAR_H): Msg::Grab must NEVER fire.
+        for y in ((parts::BAR_H as u32 + 4)..size.height as u32).step_by(6) {
+            let got = shot::click(
+                open.view(RADIUS),
+                size,
+                Point::new(size.width / 2.0, y as f32),
+            );
+            assert!(
+                !got.contains(&Msg::Grab),
+                "press at y={y} in dropdown must not grab the bar: {got:?}"
+            );
+        }
+
+        let plain = bar(Phase::Recording, false);
+        let mut silent = plain.clone();
+        silent.mic_silent = true;
+        assert!(
+            silent.size().height > plain.size().height,
+            "silent-mic card grows the window"
+        );
+        let ssize = silent.size();
+        let mut msgs = Vec::new();
+        for x in (40..ssize.width as u32).step_by(24) {
+            for y in ((parts::BAR_H as u32 + 4)..ssize.height as u32).step_by(10) {
+                let got = shot::click(silent.view(RADIUS), ssize, Point::new(x as f32, y as f32));
+                assert!(
+                    !got.contains(&Msg::Grab),
+                    "press on silent card must not grab"
+                );
+                msgs.extend(got);
+            }
+        }
+        assert!(
+            msgs.contains(&Msg::MicSettings),
+            "MicSettings button missing: {msgs:?}"
+        );
+        assert!(
+            msgs.contains(&Msg::DismissSilent),
+            "DismissSilent button missing: {msgs:?}"
+        );
     }
 }

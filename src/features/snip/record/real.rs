@@ -175,6 +175,21 @@ impl Real {
         }
     }
 
+    /// Switches the live microphone input to `id` (`None` = OS default).
+    pub fn switch_mic(&self, id: Option<String>) -> Result<(), String> {
+        let Some(l) = &self.live else {
+            return Ok(());
+        };
+        let input = audio::Input::open(Kind::Mic(id)).map_err(|e| e.to_string())?;
+        l.session.replace_mic(Box::new(Sound(input)));
+        Ok(())
+    }
+
+    /// True when an unmuted microphone has been delivering continuous all-zero packets.
+    pub fn mic_silent(&self) -> bool {
+        self.live.as_ref().is_some_and(|l| l.session.mic_silent())
+    }
+
     pub fn level(&self) -> f32 {
         self.live.as_ref().map_or(0.0, |l| l.session.level())
     }
@@ -307,6 +322,38 @@ mod tests {
             assert!(asked.borrow().contains(&Kind::System), "sound {sound}");
             assert_eq!(asked.borrow().contains(&Kind::Mic(None)), mic.is_some());
             assert_eq!(inputs.iter().filter(|(c, _)| *c == Chan::Sound).count(), 1);
+        }
+    }
+
+    /// R04C live (Windows PC or VM; play a tone first): an audio-only recording of 5 s with the
+    /// microphone and the PC's sound; the file's path goes to `OC_REC_OUT` (else is printed).
+    /// `cargo test live_recording_keeps_the_sound -- --ignored --nocapture`
+    #[test]
+    #[ignore = "needs real sound devices; run on a PC or the Windows VM"]
+    fn live_recording_keeps_the_sound() {
+        let mut real = Real::default();
+        // OC_VIDEO=1: a 640 x 360 area of the screen too (the sound goes into the MP4)
+        let video = std::env::var_os("OC_VIDEO").is_some();
+        let req = Request {
+            audio_only: !video,
+            region: video.then_some((0, 0, 640, 360)),
+            // OC_MIC_INDEX: the n-th listed microphone BY ITS ID (the bar's picker), else the default
+            mic: Some(std::env::var("OC_MIC_INDEX").ok().and_then(|n| {
+                let list = audio::devices(Kind::Mic(None)).ok()?;
+                Some(list.get(n.parse::<usize>().ok()?)?.id.clone())
+            })),
+            sound: true,
+            fps: 30,
+            ..Request::default()
+        };
+        real.begin(&req).map_err(|f| f.note).expect("begin");
+        std::thread::sleep(Duration::from_secs(5));
+        let done = real.flush_async().expect("live").recv().expect("flushed");
+        assert_eq!(done.error, None);
+        let file = done.file.expect("a file");
+        match std::env::var_os("OC_REC_OUT") {
+            Some(to) => drop(std::fs::copy(&file, to).expect("copy")),
+            None => println!("recording: {}", file.display()),
         }
     }
 }

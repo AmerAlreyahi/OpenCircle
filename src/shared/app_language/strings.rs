@@ -3037,14 +3037,14 @@ strings! {
         | "تعديل في استوديو OpenCircle";
     rec_open_with: "Open with…"
         | "فتح باستخدام…";
-    rec_keep_h: "Stop recording?"
-        | "إيقاف التسجيل؟";
-    rec_keep_d: "You recorded {}."
-        | "سجّلت {}.";
-    rec_keep: "Keep"
-        | "إبقاء";
-    rec_discard_btn: "Discard"
-        | "تجاهل";
+    rec_mic_silent_h: "Microphone is silent"
+        | "الميكروفون صامت";
+    rec_mic_silent_d: "No sound is coming from your microphone. Check that it is not muted and that microphone access is allowed."
+        | "لا يصل صوت من الميكروفون. تأكّد من أنه غير مكتوم وأن إذن الميكروفون مفعّل.";
+    rec_mic_settings: "Microphone settings"
+        | "إعدادات الميكروفون";
+    rec_mic_silent_dismiss: "Dismiss"
+        | "إغلاق";
     win_t_record: "OpenCircle recording"
         | "تسجيل OpenCircle";
     rec_mute: "Mute microphone"

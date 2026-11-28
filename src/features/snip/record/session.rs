@@ -61,6 +61,9 @@ pub struct Config {
     pub sound_muted: bool,
     /// Blur zones (R-06): hidden in every frame BEFORE it is queued for the encoder.
     pub zones: Option<Hook>,
+    /// Continuous all-zero frames from an unmuted microphone before raising the silent-mic notice
+    /// (default: 3 s at 48 kHz; `0` disables).
+    pub mic_silent_frames: u64,
 }
 
 impl Config {
@@ -75,6 +78,7 @@ impl Config {
             mic_muted: false,
             sound_muted: false,
             zones: None,
+            mic_silent_frames: 3 * u64::from(crate::shared::platform::audio::RATE),
         }
     }
 }
@@ -99,10 +103,13 @@ struct Shared {
     level: AtomicU32,
     /// Frames of sound written (the time of the next sample).
     audio_frames: AtomicU64,
+    /// True when an unmuted microphone has delivered continuous all-zero packets for `mic_silent_frames`.
+    mic_silent: AtomicBool,
 }
 
 enum Msg {
     Audio(Chan, Vec<f32>, Instant),
+    MicSwitched,
     Pause(bool),
     Stop,
 }
@@ -114,7 +121,10 @@ pub struct Session {
     origin: Instant,
     clock: Arc<Mutex<Clock>>,
     control: Sender<Msg>,
+    fault_tx: Sender<Fault>,
     faults: Receiver<Fault>,
+    mic_stop: Mutex<Arc<AtomicBool>>,
+    mic_thread: Mutex<Option<JoinHandle<()>>>,
     threads: Vec<JoinHandle<()>>,
     sink: JoinHandle<Result<(), String>>,
 }
@@ -149,11 +159,23 @@ impl Session {
             inputs.iter().any(|(c, _)| *c == Chan::Mic),
             inputs.iter().any(|(c, _)| *c == Chan::Sound),
         );
+        let mic_stop = Arc::new(AtomicBool::new(false));
+        let mut mic_thread = None;
         for (chan, input) in inputs {
             let (sh, tx, ft) = (shared.clone(), control.clone(), fault_tx.clone());
-            threads.push(thread::spawn(move || listen(chan, input, &sh, tx, &ft)));
+            if chan == Chan::Mic {
+                let stop = mic_stop.clone();
+                mic_thread = Some(thread::spawn(move || {
+                    listen(chan, input, &sh, Some(stop), tx, &ft)
+                }));
+            } else {
+                threads.push(thread::spawn(move || {
+                    listen(chan, input, &sh, None, tx, &ft)
+                }));
+            }
         }
         let sh = shared.clone();
+        let writer_faults = fault_tx.clone();
         let sink = thread::spawn(move || {
             write(
                 cfg,
@@ -163,7 +185,7 @@ impl Session {
                 (has_mic, has_sound),
                 frames_rx,
                 control_rx,
-                fault_tx,
+                writer_faults,
             )
         });
         Session {
@@ -171,7 +193,10 @@ impl Session {
             origin,
             clock,
             control,
+            fault_tx,
             faults,
+            mic_stop: Mutex::new(mic_stop),
+            mic_thread: Mutex::new(mic_thread),
             threads,
             sink,
         }
@@ -191,6 +216,40 @@ impl Session {
 
     pub fn mute_mic(&self, muted: bool) {
         self.shared.mic_muted.store(muted, Ordering::SeqCst);
+        if muted {
+            self.shared.mic_silent.store(false, Ordering::Relaxed);
+        }
+    }
+
+    /// Replaces the live microphone input mid-recording: stops the previous mic listener thread
+    /// cleanly and starts reading from `input` without interrupting video or system sound.
+    pub fn replace_mic(&self, input: Box<dyn AudioIn>) {
+        let next_stop = Arc::new(AtomicBool::new(false));
+        {
+            let mut guard = self.mic_stop.lock().unwrap();
+            guard.store(true, Ordering::SeqCst);
+            *guard = next_stop.clone();
+        }
+        let prev = self.mic_thread.lock().unwrap().take();
+        if let Some(t) = prev {
+            let _ = t.join();
+        }
+        self.shared.mic_silent.store(false, Ordering::Relaxed);
+        let _ = self.control.send(Msg::MicSwitched);
+        let (sh, tx, ft) = (
+            self.shared.clone(),
+            self.control.clone(),
+            self.fault_tx.clone(),
+        );
+        let handle = thread::spawn(move || {
+            listen(Chan::Mic, input, &sh, Some(next_stop), tx, &ft);
+        });
+        *self.mic_thread.lock().unwrap() = Some(handle);
+    }
+
+    /// True when the unmuted microphone has delivered continuous all-zero packets.
+    pub fn mic_silent(&self) -> bool {
+        self.shared.mic_silent.load(Ordering::Relaxed)
     }
 
     pub fn mute_sound(&self, muted: bool) {
@@ -216,6 +275,10 @@ impl Session {
     pub fn stop(self) -> Result<Stats, String> {
         let elapsed = self.elapsed();
         self.shared.stop.store(true, Ordering::SeqCst);
+        self.mic_stop.lock().unwrap().store(true, Ordering::SeqCst);
+        if let Some(t) = self.mic_thread.lock().unwrap().take() {
+            let _ = t.join();
+        }
         for t in self.threads {
             let _ = t.join();
         }
@@ -334,10 +397,15 @@ fn listen(
     chan: Chan,
     mut input: Box<dyn AudioIn>,
     shared: &Shared,
+    local_stop: Option<Arc<AtomicBool>>,
     tx: Sender<Msg>,
     faults: &Sender<Fault>,
 ) {
-    while !shared.stop.load(Ordering::SeqCst) {
+    while !shared.stop.load(Ordering::SeqCst)
+        && !local_stop
+            .as_ref()
+            .is_some_and(|s| s.load(Ordering::SeqCst))
+    {
         match input.read(Duration::from_millis(50)) {
             Ok(Some((samples, at))) if !shared.paused.load(Ordering::SeqCst) => {
                 if tx.send(Msg::Audio(chan, samples, at)).is_err() {
@@ -399,6 +467,12 @@ fn write(
         sink.audio(mixed, Duration::from_secs_f64(at as f64 / 48_000.0))
     };
     let mut stopping = false;
+    let mut has_mic_now = has_mic;
+    let mut mic_silent_frames: u64 = 0;
+    let mut mic_pkts: u64 = 0;
+    let mut mic_peak: f32 = 0.0;
+    let mut sound_pkts: u64 = 0;
+    let mut sound_peak: f32 = 0.0;
     // a write that failed: said once at once (the bar stops and keeps the file), nothing more is
     // written (the file is as valid as it got)
     let fail = |failed: &mut Option<String>, e: String| {
@@ -423,17 +497,62 @@ fn write(
             idle = false;
             match msg {
                 Msg::Audio(Chan::Mic, s, at) => {
+                    mic_pkts += 1;
+                    let pkt_peak = s
+                        .iter()
+                        .filter(|v| v.is_finite())
+                        .map(|v| v.abs())
+                        .fold(0.0f32, f32::max);
+                    mic_peak = mic_peak.max(pkt_peak);
+                    if !shared.mic_muted.load(Ordering::SeqCst)
+                        && !shared.paused.load(Ordering::SeqCst)
+                    {
+                        if pkt_peak > 1e-6 {
+                            mic_silent_frames = 0;
+                            shared.mic_silent.store(false, Ordering::Relaxed);
+                        } else {
+                            mic_silent_frames += (s.len() / 2) as u64;
+                            if cfg.mic_silent_frames > 0
+                                && mic_silent_frames >= cfg.mic_silent_frames
+                            {
+                                shared.mic_silent.store(true, Ordering::Relaxed);
+                            }
+                        }
+                    } else {
+                        mic_silent_frames = 0;
+                        shared.mic_silent.store(false, Ordering::Relaxed);
+                    }
                     sync(&mut mixer);
                     mixer.push_mic(&s, at)
                 }
                 Msg::Audio(Chan::Sound, s, at) => {
+                    sound_pkts += 1;
+                    let pkt_peak = s
+                        .iter()
+                        .filter(|v| v.is_finite())
+                        .map(|v| v.abs())
+                        .fold(0.0f32, f32::max);
+                    sound_peak = sound_peak.max(pkt_peak);
                     sync(&mut mixer);
                     mixer.push_system(&s, at)
                 }
-                Msg::Pause(true) => sink.pause(true),
+                Msg::MicSwitched => {
+                    has_mic_now = true;
+                    mixer.enable_mic();
+                    mic_silent_frames = 0;
+                    shared.mic_silent.store(false, Ordering::Relaxed);
+                }
+                Msg::Pause(true) => {
+                    mic_silent_frames = 0;
+                    shared.mic_silent.store(false, Ordering::Relaxed);
+                    sink.pause(true);
+                }
                 Msg::Pause(false) => {
                     // the pause is not in the sound: a mixer that starts again from now
-                    mixer = new_mixer();
+                    mic_silent_frames = 0;
+                    shared.mic_silent.store(false, Ordering::Relaxed);
+                    mixer = Mixer::stereo_48k(has_mic_now, has_sound);
+                    mixer.start(Instant::now());
                     sync(&mut mixer);
                     sink.pause(false);
                 }
@@ -473,6 +592,11 @@ fn write(
         if let Err(e) = sink.audio(&mixed, Duration::from_secs_f64(at as f64 / 48_000.0)) {
             fail(&mut failed, e);
         }
+    }
+    if has_mic_now || has_sound {
+        crate::log!(
+            "[opencircle] recording audio: mic {mic_pkts} pkts (peak {mic_peak:.4}), sound {sound_pkts} pkts (peak {sound_peak:.4})"
+        );
     }
     let closed = sink.finish();
     match (failed, closed) {
@@ -1085,5 +1209,86 @@ mod tests {
         let stats = s.stop().unwrap();
         assert!(stats.dropped >= 10, "{stats:?}");
         assert!(stats.frames >= 3);
+    }
+
+    /// R04C-1: replacing the live microphone switches the samples written to the sink from the old
+    /// device to the new one without stopping the recording.
+    #[test]
+    fn r04c_1_replace_mic_switches_live_audio_input() {
+        struct ConstIn(f32);
+        impl AudioIn for ConstIn {
+            fn read(&mut self, _: Duration) -> Result<Option<(Vec<f32>, Instant)>, String> {
+                thread::sleep(Duration::from_millis(20));
+                Ok(Some((vec![self.0; 960 * 2], Instant::now())))
+            }
+        }
+        struct PcmSink(Arc<Mutex<Vec<f32>>>);
+        impl Sink for PcmSink {
+            fn video(&mut self, _: &[u8], _: Duration) -> Result<(), String> {
+                Ok(())
+            }
+            fn audio(&mut self, pcm: &[f32], _: Duration) -> Result<(), String> {
+                self.0.lock().unwrap().extend_from_slice(pcm);
+                Ok(())
+            }
+            fn pause(&mut self, _: bool) {}
+            fn finish(self: Box<Self>) -> Result<(), String> {
+                Ok(())
+            }
+        }
+        let samples = Arc::new(Mutex::new(Vec::new()));
+        let sink = Box::new(PcmSink(samples.clone()));
+        let s = Session::start(
+            cfg(u64::MAX),
+            None,
+            vec![(Chan::Mic, Box::new(ConstIn(0.15)))],
+            sink,
+        );
+        thread::sleep(Duration::from_millis(180));
+        s.replace_mic(Box::new(ConstIn(0.75)));
+        thread::sleep(Duration::from_millis(220));
+        s.stop().unwrap();
+        let pcm = samples.lock().unwrap();
+        let has_old = pcm.iter().any(|&v| (v - 0.15).abs() < 0.02);
+        let has_new = pcm.iter().any(|&v| (v - 0.75).abs() < 0.02);
+        assert!(has_old, "expected initial mic samples (~0.15)");
+        assert!(has_new, "expected switched mic samples (~0.75)");
+    }
+
+    /// R04C-2: continuous all-zero packets from an unmuted microphone trigger `mic_silent()`,
+    /// muted microphones never trigger it, and switching to a live mic clears it.
+    #[test]
+    fn r04c_2_silent_mic_is_detected_and_clears_when_sound_arrives() {
+        struct ConstIn(f32);
+        impl AudioIn for ConstIn {
+            fn read(&mut self, _: Duration) -> Result<Option<(Vec<f32>, Instant)>, String> {
+                thread::sleep(Duration::from_millis(20));
+                Ok(Some((vec![self.0; 960 * 2], Instant::now())))
+            }
+        }
+        let log = Arc::new(Log::default());
+        let sink = Box::new(FakeSink {
+            log: log.clone(),
+            slow: Duration::ZERO,
+        });
+        let mut c = cfg(u64::MAX);
+        c.mic_silent_frames = 4800; // 100 ms
+        c.mic_muted = true;
+        let s = Session::start(c, None, vec![(Chan::Mic, Box::new(ConstIn(0.0)))], sink);
+        thread::sleep(Duration::from_millis(160));
+        assert!(!s.mic_silent(), "muted mic must not raise silent notice");
+        s.mute_mic(false);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !s.mic_silent() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            s.mic_silent(),
+            "unmuted all-zero mic must raise silent notice"
+        );
+        s.replace_mic(Box::new(ConstIn(0.4)));
+        thread::sleep(Duration::from_millis(120));
+        assert!(!s.mic_silent(), "live audio clears silent notice");
+        s.stop().unwrap();
     }
 }

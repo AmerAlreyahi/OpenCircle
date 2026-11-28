@@ -435,4 +435,67 @@ mod tests {
             "expected audio samples from system output"
         );
     }
+
+    /// Real capture of BOTH sources for 5 s (play a tone on the PC and talk or tap the mic):
+    /// `cargo test live_both_inputs_report_peaks -- --ignored --nocapture`. Windows R04C: the
+    /// loopback peak must be well above -60 dB (0.001) while a tone plays.
+    #[test]
+    #[ignore]
+    fn live_both_inputs_report_peaks() {
+        let run = |kind: Kind| {
+            std::thread::spawn(move || {
+                let label = format!("{kind:?}");
+                let mut input = Input::open(kind).expect("open");
+                let end = Instant::now() + Duration::from_secs(5);
+                let (mut packets, mut frames, mut peak) = (0usize, 0usize, 0.0f32);
+                while Instant::now() < end {
+                    if let Some(p) = input.read(Duration::from_millis(50)).expect("read") {
+                        packets += 1;
+                        frames += p.samples.len() / 2;
+                        peak = p.samples.iter().fold(peak, |m, s| m.max(s.abs()));
+                    }
+                }
+                println!("{label}: {packets} packets, {frames} frames, peak {peak:.5}");
+                (frames, peak)
+            })
+        };
+        let (mic, sys) = (run(Kind::Mic(None)), run(Kind::System));
+        let (mic, sys) = (mic.join().unwrap(), sys.join().unwrap());
+        assert!(
+            mic.0 > 0 && sys.0 > 0,
+            "no frames: mic {mic:?} system {sys:?}"
+        );
+    }
+
+    /// Every listed microphone opened BY ITS ID, 2 s each (the picker's path): name, default and peak.
+    /// `cargo test live_each_listed_mic_opens_by_id -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_each_listed_mic_opens_by_id() {
+        for d in devices(Kind::Mic(None)).expect("list") {
+            let opened = Input::open(Kind::Mic(Some(d.id.clone())));
+            let Ok(mut input) = opened else {
+                println!(
+                    "{} [{}] default {}: OPEN FAILED {:?}",
+                    d.name,
+                    d.id,
+                    d.is_default,
+                    opened.err()
+                );
+                continue;
+            };
+            let end = Instant::now() + Duration::from_secs(2);
+            let (mut frames, mut peak) = (0usize, 0.0f32);
+            while Instant::now() < end {
+                if let Ok(Some(p)) = input.read(Duration::from_millis(50)) {
+                    frames += p.samples.len() / 2;
+                    peak = p.samples.iter().fold(peak, |m, s| m.max(s.abs()));
+                }
+            }
+            println!(
+                "{} [{}] default {}: {frames} frames, peak {peak:.5}",
+                d.name, d.id, d.is_default
+            );
+        }
+    }
 }

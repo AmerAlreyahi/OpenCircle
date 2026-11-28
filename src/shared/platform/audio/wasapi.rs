@@ -93,8 +93,21 @@ impl WasapiInput {
             }
         };
 
-        let mut resampler = Resampler::new(config.sample_rate(), config.channels(), RATE);
-        let (mut data_tx, rx) = audio_channel(CALLBACK_CHANNEL_CAP);
+        let dev_name = device
+            .description()
+            .ok()
+            .map(|d| d.name().to_string())
+            .unwrap_or_else(|| device.to_string());
+        crate::log!(
+            "[opencircle] audio open: '{}' ({} Hz, {} ch, {})",
+            dev_name,
+            config.sample_rate(),
+            config.channels(),
+            config.sample_format()
+        );
+
+        let resampler = Resampler::new(config.sample_rate(), config.channels(), RATE);
+        let (data_tx, rx) = audio_channel(CALLBACK_CHANNEL_CAP);
         let err_tx = data_tx.error_handle();
         // A dropped buffer now and then (xrun) is non-fatal: don't fail the stream.
         let error = move |e: cpal::Error| {
@@ -105,62 +118,33 @@ impl WasapiInput {
         };
 
         let stream = match config.sample_format() {
-            cpal::SampleFormat::F32 => device.build_input_stream(
-                config.config(),
-                move |d: &[f32], _: &cpal::InputCallbackInfo| {
-                    data_tx.push_resampled(&mut resampler, d.iter().copied(), Instant::now());
-                },
-                error,
-                None,
-            ),
-            cpal::SampleFormat::I16 => device.build_input_stream(
-                config.config(),
-                move |d: &[i16], _: &cpal::InputCallbackInfo| {
-                    data_tx.push_resampled(
-                        &mut resampler,
-                        d.iter().map(|&s| f32::from(s) / 32768.0),
-                        Instant::now(),
-                    );
-                },
-                error,
-                None,
-            ),
-            cpal::SampleFormat::U16 => device.build_input_stream(
-                config.config(),
-                move |d: &[u16], _: &cpal::InputCallbackInfo| {
-                    data_tx.push_resampled(
-                        &mut resampler,
-                        d.iter().map(|&s| (f32::from(s) - 32768.0) / 32768.0),
-                        Instant::now(),
-                    );
-                },
-                error,
-                None,
-            ),
-            cpal::SampleFormat::I32 => device.build_input_stream(
-                config.config(),
-                move |d: &[i32], _: &cpal::InputCallbackInfo| {
-                    data_tx.push_resampled(
-                        &mut resampler,
-                        d.iter().map(|&s| (f64::from(s) / 2_147_483_648.0) as f32),
-                        Instant::now(),
-                    );
-                },
-                error,
-                None,
-            ),
-            cpal::SampleFormat::F64 => device.build_input_stream(
-                config.config(),
-                move |d: &[f64], _: &cpal::InputCallbackInfo| {
-                    data_tx.push_resampled(
-                        &mut resampler,
-                        d.iter().map(|&s| s as f32),
-                        Instant::now(),
-                    );
-                },
-                error,
-                None,
-            ),
+            cpal::SampleFormat::F32 => {
+                build_stream::<f32>(&device, config.config(), data_tx, resampler, error)
+            }
+            cpal::SampleFormat::F64 => {
+                build_stream::<f64>(&device, config.config(), data_tx, resampler, error)
+            }
+            cpal::SampleFormat::I8 => {
+                build_stream::<i8>(&device, config.config(), data_tx, resampler, error)
+            }
+            cpal::SampleFormat::I16 => {
+                build_stream::<i16>(&device, config.config(), data_tx, resampler, error)
+            }
+            cpal::SampleFormat::I24 => {
+                build_stream::<cpal::I24>(&device, config.config(), data_tx, resampler, error)
+            }
+            cpal::SampleFormat::I32 => {
+                build_stream::<i32>(&device, config.config(), data_tx, resampler, error)
+            }
+            cpal::SampleFormat::U8 => {
+                build_stream::<u8>(&device, config.config(), data_tx, resampler, error)
+            }
+            cpal::SampleFormat::U16 => {
+                build_stream::<u16>(&device, config.config(), data_tx, resampler, error)
+            }
+            cpal::SampleFormat::U32 => {
+                build_stream::<u32>(&device, config.config(), data_tx, resampler, error)
+            }
             other => {
                 return Err(Error::Unsupported(format!(
                     "unsupported sample format {other}"
@@ -191,4 +175,29 @@ fn find_input_device(host: &cpal::Host, id: &str) -> Option<cpal::Device> {
     host.input_devices()
         .ok()?
         .find(|d| d.id().ok().is_some_and(|did| did.to_string() == id))
+}
+
+fn build_stream<T: cpal::SizedSample>(
+    device: &cpal::Device,
+    config: cpal::StreamConfig,
+    mut data_tx: super::channel::AudioSender,
+    mut resampler: Resampler,
+    error: impl FnMut(cpal::Error) + Send + 'static,
+) -> Result<cpal::Stream, cpal::Error>
+where
+    f32: cpal::FromSample<T>,
+{
+    device.build_input_stream(
+        config,
+        move |d: &[T], _: &cpal::InputCallbackInfo| {
+            data_tx.push_resampled(
+                &mut resampler,
+                d.iter()
+                    .map(|&s| <f32 as cpal::FromSample<T>>::from_sample_(s)),
+                Instant::now(),
+            );
+        },
+        error,
+        None,
+    )
 }

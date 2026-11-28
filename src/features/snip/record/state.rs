@@ -6,14 +6,12 @@
 //! Idle --StartAudio--> Recording(audio)
 //! Recording <--Pause / Resume--> Paused
 //! Recording|Paused --Stop / the start key--> Stopping --Flushed--> Result --Dismissed--> Idle
-//! Recording|Paused --Esc--> AskKeep --Keep--> Stopping ; --Discard--> Idle
 //! Recording|Paused --Discard (bin)--> Idle
 //! any --Fault--> Error (disk low / stream ended: Stopping, what we have is kept)
 //! ```
-//! Choices the design is silent on: a second Esc in `AskKeep` goes back to
-//! recording (the user changed their mind); a start key during the countdown
-//! is ignored (it must not start a second recording); a second Stop while
-//! `Stopping` is ignored.
+//! Esc does nothing while recording or paused (owner, 2026-11-28). Choices the design is
+//! silent on: a start key during the countdown is ignored (it must not start a second
+//! recording); a second Stop while `Stopping` is ignored.
 
 /// Where a recording is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,11 +32,6 @@ pub enum State {
     /// Flushing the file ("Saving").
     Stopping {
         audio_only: bool,
-    },
-    /// Esc while recording: Keep or Discard? (`was_paused`: where Esc goes back to.)
-    AskKeep {
-        audio_only: bool,
-        was_paused: bool,
     },
     /// The corner thumbnail (S2) is up.
     Result {
@@ -95,7 +88,6 @@ pub enum Event {
     #[cfg_attr(not(test), allow(dead_code))]
     Key,
     Esc,
-    Keep,
     /// The bar's bin.
     Discard,
     /// A recording an earlier run left behind is offered on the thumbnail.
@@ -128,12 +120,9 @@ pub enum Effect {
 }
 
 impl State {
-    /// Recording, paused or asking Keep / Discard: a bar is on screen.
+    /// Recording or paused: a bar is on screen.
     pub fn is_live(self) -> bool {
-        matches!(
-            self,
-            State::Recording { .. } | State::Paused { .. } | State::AskKeep { .. }
-        )
+        matches!(self, State::Recording { .. } | State::Paused { .. })
     }
 
     #[cfg(test)]
@@ -143,10 +132,6 @@ impl State {
             State::Recording { audio_only: true }
                 | State::Paused { audio_only: true }
                 | State::Stopping { audio_only: true }
-                | State::AskKeep {
-                    audio_only: true,
-                    ..
-                }
                 | State::Result { audio_only: true }
         )
     }
@@ -186,40 +171,11 @@ impl State {
             (S::Recording { audio_only } | S::Paused { audio_only }, E::Stop | E::Key) => {
                 (S::Stopping { audio_only }, Some(Effect::Flush))
             }
-            (S::Recording { audio_only }, E::Esc) => (
-                S::AskKeep {
-                    audio_only,
-                    was_paused: false,
-                },
-                None,
-            ),
-            (S::Paused { audio_only }, E::Esc) => (
-                S::AskKeep {
-                    audio_only,
-                    was_paused: true,
-                },
-                None,
-            ),
-            (S::AskKeep { audio_only, .. }, E::Keep | E::Stop | E::Key) => {
-                (S::Stopping { audio_only }, Some(Effect::Flush))
-            }
-            (
-                S::AskKeep {
-                    audio_only,
-                    was_paused,
-                },
-                E::Esc,
-            ) => (
-                match was_paused {
-                    true => S::Paused { audio_only },
-                    false => S::Recording { audio_only },
-                },
-                None,
-            ),
-            (S::Recording { .. } | S::Paused { .. } | S::AskKeep { .. }, E::Discard) => {
+            // Esc does NOTHING while recording (owner, 2026-11-28): Stop is the record key, the
+            // bar's Stop or the tray
+            (S::Recording { .. } | S::Paused { .. }, E::Discard) => {
                 (S::Idle, Some(Effect::DeleteTemp))
             }
-            (S::AskKeep { .. }, E::Dismiss) => same,
             // stopping: a second Stop is nothing; the flush ends in the thumbnail
             (S::Stopping { audio_only }, E::Flushed) => (S::Result { audio_only }, None),
             (S::Stopping { .. }, E::FlushFailed(f)) => (S::Error(f), None),
@@ -251,10 +207,6 @@ mod tests {
     const REC: S = S::Recording { audio_only: false };
     const PAU: S = S::Paused { audio_only: false };
     const STOPPING: S = S::Stopping { audio_only: false };
-    const KEEP: S = S::AskKeep {
-        audio_only: false,
-        was_paused: false,
-    };
 
     /// Every arrow of R-01's diagram, one row each: from, event, to, effect.
     #[test]
@@ -283,18 +235,6 @@ mod tests {
             (PAU, E::Key, STOPPING, Some(F::Flush)),
             (STOPPING, E::Flushed, S::Result { audio_only: false }, None),
             (S::Result { audio_only: false }, E::Dismiss, S::Idle, None),
-            (REC, E::Esc, KEEP, None),
-            (
-                PAU,
-                E::Esc,
-                S::AskKeep {
-                    audio_only: false,
-                    was_paused: true,
-                },
-                None,
-            ),
-            (KEEP, E::Keep, STOPPING, Some(F::Flush)),
-            (KEEP, E::Discard, S::Idle, Some(F::DeleteTemp)),
             (REC, E::Discard, S::Idle, Some(F::DeleteTemp)),
             (PAU, E::Discard, S::Idle, Some(F::DeleteTemp)),
             (REC, E::Fault(Fault::DiskLow), STOPPING, Some(F::Flush)),
@@ -339,8 +279,8 @@ mod tests {
         }
     }
 
-    /// Esc in every state: a pick or a countdown is cancelled, a recording asks, a
-    /// second Esc goes back, nothing else moves.
+    /// Esc in every state: a pick or a countdown is cancelled, a recording or a pause does
+    /// NOT move (it neither stops nor asks), nothing else moves.
     #[test]
     fn esc_in_each_state() {
         let cases = [
@@ -348,15 +288,8 @@ mod tests {
             (S::Picking, S::Idle),
             (S::Asking, S::Idle),
             (S::Countdown(2), S::Idle),
-            (REC, KEEP),
-            (
-                PAU,
-                S::AskKeep {
-                    audio_only: false,
-                    was_paused: true,
-                },
-            ),
-            (KEEP, REC),
+            (REC, REC),
+            (PAU, PAU),
             (STOPPING, STOPPING),
             (S::Result { audio_only: true }, S::Idle),
             (S::Error(Fault::Mic), S::Idle),
@@ -364,9 +297,9 @@ mod tests {
         for (from, to) in cases {
             assert_eq!(from.on(E::Esc).0, to, "Esc in {from:?}");
         }
-        // back from Keep / Discard to paused, not to recording
-        let (asking, _) = PAU.on(E::Esc);
-        assert_eq!(asking.on(E::Esc).0, PAU);
+        // no effect either: nothing is flushed, nothing deleted
+        assert_eq!(REC.on(E::Esc).1, None);
+        assert_eq!(PAU.on(E::Esc).1, None);
     }
 
     #[test]
@@ -415,7 +348,6 @@ mod tests {
             E::Resume,
             E::Stop,
             E::Key,
-            E::Keep,
             E::Discard,
             E::Flushed,
             E::Tick,
@@ -429,7 +361,6 @@ mod tests {
         assert_eq!(REC.on(E::Resume), (REC, None));
         assert_eq!(PAU.on(E::Pause), (PAU, None));
         assert_eq!(REC.on(E::StartVideo), (REC, None));
-        assert_eq!(KEEP.on(E::Pause), (KEEP, None));
     }
 
     #[test]
@@ -440,7 +371,7 @@ mod tests {
                 S::Error(Fault::Refused)
             );
         }
-        assert!(REC.is_live() && PAU.is_live() && KEEP.is_live());
+        assert!(REC.is_live() && PAU.is_live());
         assert!(!STOPPING.is_live() && !S::Idle.is_live());
     }
 }

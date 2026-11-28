@@ -64,6 +64,8 @@ pub(crate) struct Recording {
     discards: u32,
     /// What is hidden in the recording (R-06), shared with the recorder.
     pub(crate) zones: Zones,
+    /// The user dismissed the silent-microphone notice for the current mic/recording.
+    mic_silent_dismissed: bool,
 }
 
 impl Default for Recording {
@@ -91,6 +93,7 @@ impl Default for Recording {
             discard: None,
             discards: 0,
             zones: Zones::default(),
+            mic_silent_dismissed: false,
         }
     }
 }
@@ -224,6 +227,8 @@ impl App {
             .ok()
             .and_then(|d| d.into_iter().next())
             .map(|d| d.name);
+        rec.bar.sound_on = rec.bar.sound.is_some();
+        rec.mic_silent_dismissed = false;
         rec.t0 = Instant::now();
         rec.last_beat = rec.t0;
         let ev = match audio_only {
@@ -254,9 +259,7 @@ impl App {
                 Task::batch([closed, task])
             }
             // the key of what runs: stop and save (the countdown swallows it)
-            State::Recording { audio_only }
-            | State::Paused { audio_only }
-            | State::AskKeep { audio_only, .. }
+            State::Recording { audio_only } | State::Paused { audio_only }
                 if audio_only == audio =>
             {
                 self.record_event(Event::Key, at)
@@ -317,7 +320,7 @@ impl App {
         Task::batch([closed, self.record_show(Instant::now())])
     }
 
-    /// Esc while recording: stop and ask Keep / Discard.
+    /// Esc: cancels a pick or the countdown; while recording or paused it does nothing.
     pub(crate) fn record_esc(&mut self) -> Task<Message> {
         self.record_event(Event::Esc, Instant::now())
     }
@@ -418,20 +421,13 @@ impl App {
         let rec = &mut self.rec;
         let now = at.saturating_duration_since(rec.t0);
         let elapsed = rec.clock.elapsed(now);
-        let (phase, ask) = match rec.state {
-            State::Picking | State::Asking | State::Countdown(_) => (Some(Phase::Ready), false),
-            State::Recording { .. } => (Some(Phase::Recording), false),
-            State::Paused { .. } => (Some(Phase::Paused), false),
-            State::AskKeep { was_paused, .. } => (
-                Some(match was_paused {
-                    true => Phase::Paused,
-                    false => Phase::Recording,
-                }),
-                true,
-            ),
-            State::Stopping { .. } => (Some(Phase::Saving), false),
-            State::Error(f) => (Some(Phase::Error(f)), false),
-            State::Idle | State::Result { .. } => (None, false),
+        let phase = match rec.state {
+            State::Picking | State::Asking | State::Countdown(_) => Some(Phase::Ready),
+            State::Recording { .. } => Some(Phase::Recording),
+            State::Paused { .. } => Some(Phase::Paused),
+            State::Stopping { .. } => Some(Phase::Saving),
+            State::Error(f) => Some(Phase::Error(f)),
+            State::Idle | State::Result { .. } => None,
         };
         let screen = rec.screen;
         let mut tasks = Vec::new();
@@ -439,9 +435,11 @@ impl App {
             (Some(phase), Surface::Bar) => {
                 let b = &mut rec.bar;
                 b.phase = phase;
-                b.ask = ask;
                 b.elapsed = elapsed;
                 b.menu &= matches!(phase, Phase::Ready | Phase::Recording | Phase::Paused);
+                b.mic_silent = !rec.mic_silent_dismissed
+                    && !b.muted
+                    && rec.real.as_ref().is_some_and(|r| r.mic_silent());
                 b.zones = rec.zones.list().len();
                 b.count = match rec.state {
                     State::Countdown(n) => Some(n),
@@ -558,7 +556,6 @@ impl App {
             M::Resume => Event::Resume,
             M::Stop => Event::Stop,
             M::Discard => Event::Discard,
-            M::Keep => Event::Keep,
             M::HideArea => return self.record_hide_pick(false),
             M::HideApp => return self.record_hide_pick(true),
             M::HideClear => {
@@ -570,22 +567,57 @@ impl App {
                 self.rec.bar.menu = !self.rec.bar.menu;
                 return self.record_show(at);
             }
-            // "Off" mutes (the mic is kept, to come back to); a microphone unmutes
+            // "Off" mutes (the mic is kept, to come back to); a microphone unmutes and switches
+            // the live audio input when another device is chosen mid-recording
             M::Mic(i) => {
+                let prev = self.rec.bar.mic;
+                let switching = i.is_some() && i != prev;
                 self.rec.bar.muted = i.is_none();
                 self.rec.bar.mic = i.or(self.rec.bar.mic);
                 self.rec.bar.menu = false;
                 self.rec.tray = None;
+                if switching {
+                    self.rec.mic_silent_dismissed = false;
+                }
                 if let Some(real) = &self.rec.real {
+                    if switching
+                        && matches!(
+                            self.rec.state,
+                            State::Recording { .. } | State::Paused { .. }
+                        )
+                    {
+                        let id = self
+                            .rec
+                            .bar
+                            .mic
+                            .and_then(|idx| self.rec.mic_ids.get(idx).cloned());
+                        if let Err(e) = real.switch_mic(id) {
+                            crate::log!("[opencircle] recording: switch microphone failed ({e})");
+                        }
+                    }
                     real.mute_mic(self.rec.bar.muted);
                 }
                 return self.record_show(at);
             }
             M::Sound(on) => {
                 self.rec.bar.sound_on = on;
+                self.rec.bar.menu = false;
                 if let Some(real) = &self.rec.real {
                     real.mute_sound(!on);
                 }
+                return self.record_show(at);
+            }
+            M::MicSettings => {
+                #[cfg(windows)]
+                if let Err(e) =
+                    platform::sys::open::open_system_settings("ms-settings:privacy-microphone")
+                {
+                    crate::log!("[opencircle] cannot open microphone settings: {e}");
+                }
+                return Task::none();
+            }
+            M::DismissSilent => {
+                self.rec.mic_silent_dismissed = true;
                 return self.record_show(at);
             }
             // the error card's buttons: without the microphone / again, from the start
@@ -630,7 +662,6 @@ impl App {
             Row::Mic => self.record_mute(at),
             Row::Record => self.on_record_bar(record_bar::Msg::Record),
             Row::Cancel => self.on_record_bar(record_bar::Msg::Cancel),
-            Row::Keep => self.on_record_bar(record_bar::Msg::Keep),
             Row::Retry => self.on_record_bar(record_bar::Msg::Retry),
             Row::Fix => self.on_record_bar(record_bar::Msg::Fix),
             Row::Dismiss => self.record_event(Event::Dismiss, at),
@@ -1134,15 +1165,19 @@ mod tests {
         assert_eq!(app.rec.state, State::Idle);
     }
 
-    /// R02-15: the bin discards (the temp file goes), Esc asks Keep / Discard first.
+    /// R02-15: the bin discards (the temp file goes). R04C: Esc neither stops nor asks anything
+    /// while recording or paused.
     #[test]
-    fn r02_15_discard_and_the_keep_question() {
+    fn r02_15_discard_and_esc_does_nothing_while_recording() {
         let mut app = app();
         recording(&mut app);
-        let _ = app.record_event(Event::Esc, Instant::now());
-        assert!(app.windows.record_bar().unwrap().ask, "the keep card");
-        let _ = app.record_event(Event::Esc, Instant::now());
-        assert!(!app.windows.record_bar().unwrap().ask, "Esc again: back");
+        let _ = app.record_esc();
+        assert_eq!(app.rec.state, State::Recording { audio_only: false });
+        let _ = app.on_record_bar(B::Pause);
+        let _ = app.record_esc();
+        assert_eq!(app.rec.state, State::Paused { audio_only: false });
+        assert!(app.rec.fake.log.iter().all(|e| *e != Effect::Flush));
+        let _ = app.on_record_bar(B::Resume);
         let _ = app.on_record_bar(B::Discard);
         assert_eq!(app.rec.state, State::Idle);
         assert!(app.windows.record_bar().is_none() && app.windows.record_thumb().is_none());
@@ -1243,8 +1278,8 @@ mod tests {
         assert_eq!(app.rec.fake.log, [Effect::DeleteTemp]);
     }
 
-    /// R02-24: in the tray (whole screen), Error and the Keep question have rows and a press on
-    /// them leaves the state; Ready has Record / Cancel.
+    /// R02-24: in the tray (whole screen), Error has rows and a press on them leaves the state;
+    /// Ready has Record / Cancel.
     #[test]
     fn r02_24_the_tray_has_a_way_out_of_every_card() {
         let rows = || {
@@ -1257,9 +1292,7 @@ mod tests {
         let _ = app.record_start_on(false, Target::WholeScreen, false);
         assert_eq!(rows(), Some(vec![Row::Record, Row::Cancel]));
         let _ = app.on_record_row(Row::Record);
-        let _ = app.record_event(Event::Esc, Instant::now());
-        assert_eq!(rows(), Some(vec![Row::Keep, Row::Discard]));
-        let _ = app.on_record_row(Row::Keep);
+        let _ = app.on_record_row(Row::Stop);
         assert!(app.windows.record_thumb().is_some());
         let mut app2 = App::idle(iced::window::Id::unique());
         let _ = app2.record_start_on(false, Target::WholeScreen, false);
@@ -2060,5 +2093,32 @@ mod tests {
             );
         }
         assert!(!shows_outlines(None, true, true));
+    }
+
+    /// R04C live (a PC or the Windows VM; play a tone first): the app's own glue for an audio
+    /// recording (the bar's defaults, then the PC-sound switch on) for 5 s; the file goes to
+    /// `OC_REC_OUT`. `cargo test live_app_audio_recording -- --ignored --nocapture`
+    #[test]
+    #[ignore = "needs real sound devices; run on a PC or the Windows VM"]
+    fn live_app_audio_recording() {
+        let mut app = app();
+        let _ = app.record_begin(true, Target::WholeScreen, None);
+        println!(
+            "bar: mic {:?} of {:?}, sound {:?} on {}, muted {}",
+            app.rec.bar.mic,
+            app.rec.bar.mics,
+            app.rec.bar.sound,
+            app.rec.bar.sound_on,
+            app.rec.bar.muted
+        );
+        let _ = app.on_record_bar(B::Sound(true));
+        std::thread::sleep(Duration::from_secs(5));
+        let _ = app.on_record_bar(B::Stop);
+        let done = app.rec.flushing.take().expect("flushing").recv().unwrap();
+        assert_eq!(done.error, None);
+        let file = done.file.expect("a file");
+        if let Some(to) = std::env::var_os("OC_REC_OUT") {
+            std::fs::copy(file, to).unwrap();
+        }
     }
 }
